@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { Profile } from '@vben/common-ui';
 import { useUserStore } from '@vben/stores';
@@ -31,13 +31,17 @@ const tabs = ref([
     value: 'notice',
   },
 ]);
+
+const visibleTabs = computed(() => {
+  return tabs.value.filter((tab) => tab.value !== 'notice');
+});
 </script>
 
 <template>
   <Profile
     v-model:model-value="tabsValue"
     title="个人中心"
-    :tabs="tabs"
+    :tabs="visibleTabs"
     :user-info="userStore.userInfo"
   >
     <template #content>
@@ -48,4 +52,3 @@ const tabs = ref([
     </template>
   </Profile>
 </template>
-

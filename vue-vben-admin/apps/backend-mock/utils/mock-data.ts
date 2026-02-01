@@ -24,9 +24,8 @@ export const MOCK_USERS: UserInfo[] = [
     id: 1,
     password: '123456',
     realName: 'Admin',
-    roles: ['admin'],
+    roles: ['super'],
     username: 'admin',
-    homePath: '/workspace',
   },
   {
     id: 2,
@@ -38,15 +37,17 @@ export const MOCK_USERS: UserInfo[] = [
   },
 ];
 
+const SUPER_CODES = ['AC_100100', 'AC_100110', 'AC_100120', 'AC_100010'];
+
 export const MOCK_CODES = [
   // super
   {
-    codes: ['AC_100100', 'AC_100110', 'AC_100120', 'AC_100010'],
+    codes: SUPER_CODES,
     username: 'vben',
   },
   {
-    // admin
-    codes: ['AC_100010', 'AC_100020', 'AC_100030'],
+    // admin（与 super 权限一致，仅用户名不同）
+    codes: SUPER_CODES,
     username: 'admin',
   },
   {
@@ -182,7 +183,8 @@ export const MOCK_MENUS = [
     username: 'vben',
   },
   {
-    menus: [...dashboardMenus, ...createDemosMenus('admin')],
+    // admin（与 super 菜单一致，仅用户名不同）
+    menus: [...dashboardMenus, ...createDemosMenus('super')],
     username: 'admin',
   },
   {

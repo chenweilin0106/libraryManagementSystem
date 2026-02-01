@@ -511,6 +511,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 const [Drawer, drawerApi] = useVbenDrawer({
   destroyOnClose: true,
+  onCancel() {
+    drawerApi.close();
+  },
   onConfirm: onDrawerConfirm,
   onOpenChange: async (isOpen) => {
     if (!isOpen) {
@@ -648,10 +651,14 @@ async function onDrawerConfirm() {
     return;
   }
 
-  const values = (await bookFormApi.submitForm()) as Pick<
-    Book,
-    'author' | 'category' | 'current_stock' | 'isbn' | 'title' | 'total_stock'
-  > & { cover_files?: UploadFile[] };
+  const values = (await bookFormApi.validateAndSubmitForm()) as
+    | (Pick<
+        Book,
+        'author' | 'category' | 'current_stock' | 'isbn' | 'title' | 'total_stock'
+      > & { cover_files?: UploadFile[] })
+    | undefined;
+
+  if (!values) return;
 
   const { cover_files: coverFiles, ...bookValues } = values;
   const coverFile = coverFiles?.[0];

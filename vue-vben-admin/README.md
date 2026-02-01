@@ -34,7 +34,7 @@ This is the latest version, 5.0, and it is not compatible with previous versions
 
 - [Vben Admin](https://vben.pro/) - Full version Chinese site
 
-Test Account: vben/123456
+Test Accounts: admin/123456 (default), vben/123456
 
 <div align="center">
   <img alt="VbenAdmin Logo" width="100%" src="https://anncwb.github.io/anncwb/images/preview1.png">

@@ -35,7 +35,10 @@
 - 使用 Prettier（`.prettierrc.mjs`），配合 ESLint（`eslint.config.mjs`）与 Stylelint（`stylelint.config.mjs`）。
 - 改动优先集中在 `apps/web-ele/src/`；尽量避免动 `packages/*`（除非确有必要）。
 
+## 二次封装组件使用约定
+- 优先使用项目二次封装的组件/Hook（如 `useVbenVxeGrid`、`useVbenDrawer`、`useVbenForm`、`Page` 等），避免绕过封装直接使用底层库的另一套写法。
+- 当需要实现某个功能时（如：表格高度自适应、表格+搜索表单、抽屉表单提交、动态标题/按钮文案、输入框插槽等），若 `playground/src/views/examples/**` 已有同类效果，则优先参照示例代码的写法与组合方式（配置项结构、生命周期回调、提交方式等），仅在示例未覆盖或确有业务差异时再进行最小化自定义。
+
 ## Windows / nvm 注意事项
 - Windows 下 `nvm use <version>` 可能需要管理员终端才会真正切换生效。
 - 若 `pnpm install`/`turbo build` 出现 `spawn EPERM`，请尝试在管理员终端重试相同命令。
-

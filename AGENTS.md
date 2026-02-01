@@ -29,7 +29,10 @@
 - 类型检查：`pnpm -C vue-vben-admin -F @vben/web-ele typecheck`
 - 构建（推荐用 turbo 带依赖链）：`pnpm -C vue-vben-admin exec turbo build --filter=@vben/web-ele`
 
+## 登录（前端 mock）
+- 默认管理员账号：`admin`（密码沿用 `123456`）
+- 保留账号：`vben`（密码 `123456`）
+
 ## Windows / nvm 注意事项
 - Windows 下 `nvm use <version>` 可能需要管理员终端才会真正切换生效。
 - 若 `pnpm install`/`turbo build` 出现 `spawn EPERM`，请尝试在管理员终端重试相同命令。
-

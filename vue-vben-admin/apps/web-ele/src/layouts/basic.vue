@@ -84,42 +84,53 @@ const showDot = computed(() =>
   notifications.value.some((item) => !item.isRead),
 );
 
-const menus = computed(() => [
-  {
-    handler: () => {
-      router.push({ name: 'Profile' });
+const showNotification = false;
+
+const menus = computed(() => {
+  const allMenus = [
+    {
+      handler: () => {
+        router.push({ name: 'Profile' });
+      },
+      icon: 'lucide:user',
+      text: $t('page.auth.profile'),
     },
-    icon: 'lucide:user',
-    text: $t('page.auth.profile'),
-  },
-  {
-    handler: () => {
-      openWindow(VBEN_DOC_URL, {
-        target: '_blank',
-      });
+    {
+      hidden: true,
+      handler: () => {
+        openWindow(VBEN_DOC_URL, {
+          target: '_blank',
+        });
+      },
+      icon: BookOpenText,
+      text: $t('ui.widgets.document'),
     },
-    icon: BookOpenText,
-    text: $t('ui.widgets.document'),
-  },
-  {
-    handler: () => {
-      openWindow(VBEN_GITHUB_URL, {
-        target: '_blank',
-      });
+    {
+      hidden: true,
+      handler: () => {
+        openWindow(VBEN_GITHUB_URL, {
+          target: '_blank',
+        });
+      },
+      icon: SvgGithubIcon,
+      text: 'GitHub',
     },
-    icon: SvgGithubIcon,
-    text: 'GitHub',
-  },
-  {
-    handler: () => {
-      openWindow(`${VBEN_GITHUB_URL}/issues`, {
-        target: '_blank',
-      });
+    {
+      hidden: true,
+      handler: () => {
+        openWindow(`${VBEN_GITHUB_URL}/issues`, {
+          target: '_blank',
+        });
+      },
+      icon: CircleHelp,
+      text: $t('ui.widgets.qa'),
     },
-    icon: CircleHelp,
-    text: $t('ui.widgets.qa'),
-  },
-]);
+  ];
+
+  return allMenus
+    .filter((menu) => !menu.hidden)
+    .map(({ hidden: _hidden, ...menu }) => menu);
+});
 
 const avatar = computed(() => {
   return userStore.userInfo?.avatar ?? preferences.app.defaultAvatar;
@@ -181,7 +192,7 @@ watch(
         @logout="handleLogout"
       />
     </template>
-    <template #notification>
+    <template v-if="showNotification" #notification>
       <Notification
         :dot="showDot"
         :notifications="notifications"

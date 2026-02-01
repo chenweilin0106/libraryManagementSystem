@@ -42,7 +42,7 @@ const formSchema = computed((): VbenFormSchema[] => {
         .string()
         .min(1, { message: $t('authentication.selectAccount') })
         .optional()
-        .default('vben'),
+        .default('admin'),
     },
     {
       component: 'VbenInput',
@@ -95,6 +95,7 @@ const formSchema = computed((): VbenFormSchema[] => {
     :loading="authStore.loginLoading"
     :show-code-login="false"
     :show-qrcode-login="false"
+    :show-register="false"
     :show-third-party-login="false"
     sub-title="请输入您的账户信息以进入系统"
     @submit="authStore.authLogin"
