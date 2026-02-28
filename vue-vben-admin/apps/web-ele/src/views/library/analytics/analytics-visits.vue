@@ -1,14 +1,29 @@
 <script lang="ts" setup>
 import type { EchartsUIType } from '@vben/plugins/echarts';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 
 import { EchartsUI, useEcharts } from '@vben/plugins/echarts';
+
+const props = defineProps<{
+  labels: string[];
+  values: number[];
+}>();
 
 const chartRef = ref<EchartsUIType>();
 const { renderEcharts } = useEcharts(chartRef);
 
-onMounted(() => {
+function getMax(values: number[]) {
+  const max = values.reduce((acc, cur) => (cur > acc ? cur : acc), 0);
+  if (!Number.isFinite(max) || max <= 0) return 10;
+  return Math.max(10, Math.ceil(max / 10) * 10);
+}
+
+function render() {
+  const labels = Array.isArray(props.labels) ? props.labels : [];
+  const values = Array.isArray(props.values) ? props.values : [];
+  const max = getMax(values);
+
   renderEcharts({
     grid: {
       bottom: 0,
@@ -21,10 +36,7 @@ onMounted(() => {
       {
         barMaxWidth: 80,
         // color: '#4f69fd',
-        data: [
-          3000, 2000, 3333, 5000, 3200, 4200, 3200, 2100, 3000, 5100, 6000,
-          3200, 4800,
-        ],
+        data: values,
         type: 'bar',
       },
     ],
@@ -38,16 +50,28 @@ onMounted(() => {
       trigger: 'axis',
     },
     xAxis: {
-      data: Array.from({ length: 12 }).map((_item, index) => `${index + 1}月`),
+      data: labels,
       type: 'category',
     },
     yAxis: {
-      max: 8000,
+      max,
       splitNumber: 4,
       type: 'value',
     },
   });
+}
+
+onMounted(() => {
+  render();
 });
+
+watch(
+  () => [props.labels, props.values],
+  () => {
+    render();
+  },
+  { deep: true },
+);
 </script>
 
 <template>

@@ -1,10 +1,6 @@
 import type { Context, Next } from 'koa';
 
-type ErrorResponseBody = {
-  code: number;
-  message: string;
-  data: null;
-};
+import { HttpError } from '../utils/http-error.js';
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -15,16 +11,35 @@ export async function errorHandler(ctx: Context, next: Next) {
   try {
     await next();
   } catch (error) {
-    const status = typeof (error as any)?.status === 'number' ? (error as any).status : 500;
-    const message = toErrorMessage(error);
+    const status =
+      error instanceof HttpError
+        ? error.status
+        : typeof (error as any)?.status === 'number'
+          ? (error as any).status
+          : 500;
+
+    const type =
+      error instanceof HttpError
+        ? error.type
+        : typeof (error as any)?.name === 'string'
+          ? (error as any).name
+          : status === 500
+            ? 'InternalServerError'
+            : 'Error';
+    const errorMessage =
+      error instanceof HttpError
+        ? error.error
+        : status === 500
+          ? '服务器内部错误'
+          : toErrorMessage(error);
+
     ctx.status = status;
-    const body: ErrorResponseBody = {
-      code: status === 500 ? 500 : status,
-      message,
+    ctx.body = {
+      code: -1,
       data: null,
+      error: errorMessage,
+      message: type,
     };
-    ctx.body = body;
     ctx.app.emit('error', error, ctx);
   }
 }
-

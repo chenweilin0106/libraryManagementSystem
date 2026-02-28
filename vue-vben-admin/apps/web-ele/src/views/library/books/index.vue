@@ -23,22 +23,19 @@ import {
 
 import { useVbenForm } from '#/adapter/form';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
+import type { BooksApi } from '#/api';
+import {
+  createBookApi,
+  listBooksApi,
+  setBookShelfApi,
+  uploadApi,
+  updateBookApi,
+} from '#/api';
 
 defineOptions({ name: 'Books' });
 
-type BookStatus = 'all' | 'normal' | 'deleted';
-
-interface Book {
-  author: string;
-  category: string;
-  cover_url: string;
-  created_at: string;
-  current_stock: number;
-  is_deleted: boolean;
-  isbn: string;
-  title: string;
-  total_stock: number;
-}
+type BookStatus = BooksApi.BookStatus;
+type Book = BooksApi.Book;
 
 const CATEGORY_OPTIONS = [
   { label: '计算机', value: '计算机' },
@@ -54,100 +51,10 @@ const STATUS_OPTIONS: Array<{ label: string; value: BookStatus }> = [
   { label: '已下架', value: 'deleted' },
 ];
 
-const books = ref<Book[]>([
-  {
-    author: '余华',
-    category: '文学',
-    cover_url: '/covers/cover-placeholder.svg',
-    created_at: '2026-01-10T10:00:00.000Z',
-    current_stock: 10,
-    is_deleted: false,
-    isbn: '9787530216787',
-    title: '活着',
-    total_stock: 10,
-  },
-  {
-    author: 'Robert C. Martin',
-    category: '计算机',
-    cover_url: '/covers/cover-placeholder.svg',
-    created_at: '2026-01-08T12:00:00.000Z',
-    current_stock: 6,
-    is_deleted: false,
-    isbn: '9780132350884',
-    title: 'Clean Code',
-    total_stock: 6,
-  },
-  {
-    author: '吴军',
-    category: '计算机',
-    cover_url: '/covers/cover-placeholder.svg',
-    created_at: '2026-01-05T09:30:00.000Z',
-    current_stock: 0,
-    is_deleted: true,
-    isbn: '9787115472984',
-    title: '浪潮之巅',
-    total_stock: 8,
-  },
-  {
-    author: '尤瓦尔·赫拉利',
-    category: '历史',
-    cover_url: '/covers/cover-placeholder.svg',
-    created_at: '2026-01-02T15:20:00.000Z',
-    current_stock: 3,
-    is_deleted: false,
-    isbn: '9787508660752',
-    title: '人类简史',
-    total_stock: 3,
-  },
-  {
-    author: '张维迎',
-    category: '经济',
-    cover_url: '/covers/cover-placeholder.svg',
-    created_at: '2025-12-28T08:00:00.000Z',
-    current_stock: 12,
-    is_deleted: false,
-    isbn: '9787301298130',
-    title: '经济学原理（导论）',
-    total_stock: 12,
-  },
-  {
-    author: '东野圭吾',
-    category: '文学',
-    cover_url: '/covers/cover-placeholder.svg',
-    created_at: '2025-12-20T08:00:00.000Z',
-    current_stock: 5,
-    is_deleted: false,
-    isbn: '9787544270878',
-    title: '白夜行',
-    total_stock: 5,
-  },
-  {
-    author: '钱穆',
-    category: '历史',
-    cover_url: '/covers/cover-placeholder.svg',
-    created_at: '2025-12-12T08:00:00.000Z',
-    current_stock: 2,
-    is_deleted: false,
-    isbn: '9787108018803',
-    title: '国史大纲',
-    total_stock: 2,
-  },
-  {
-    author: '佚名',
-    category: '其他',
-    cover_url: '/covers/cover-placeholder.svg',
-    created_at: '2025-12-01T08:00:00.000Z',
-    current_stock: 1,
-    is_deleted: false,
-    isbn: '9780000000000',
-    title: '示例图书',
-    total_stock: 1,
-  },
-]);
-
 const drawerMode = ref<'create' | 'edit'>('create');
 const drawerActiveTab = ref<'manual' | 'import'>('manual');
 const editingOriginalIsbn = ref<string | null>(null);
+const editingOriginalCoverUrl = ref<string | null>(null);
 const uploadFileList = ref<any[]>([]);
 const coverPreviewUrl = ref<string>('');
 const coverPreviewOpen = ref(false);
@@ -158,6 +65,7 @@ const managedObjectUrls = new Set<string>();
 const rawObjectUrlMap = new WeakMap<File, string>();
 let activeCoverObjectUrls = new Set<string>();
 let retainedCoverObjectUrls = new Set<string>();
+const gridPager = ref({ currentPage: 1, pageSize: 20 });
 
 function getOrCreateManagedObjectUrl(raw: File) {
   const existing = rawObjectUrlMap.get(raw);
@@ -215,9 +123,12 @@ function releaseCoverObjectUrl(url: string) {
   maybeRevokeManagedObjectUrl(url);
 }
 
-const drawerTitle = computed(() => (drawerMode.value === 'create' ? '新增图书' : '编辑图书'));
+const drawerTitle = computed(() =>
+  drawerMode.value === 'create' ? '新书入库' : '编辑图书',
+);
 const drawerConfirmText = computed(() => {
   if (drawerMode.value === 'create' && drawerActiveTab.value === 'import') return '上传';
+  if (drawerMode.value === 'create') return '入库';
   return '保存';
 });
 
@@ -360,32 +271,23 @@ const gridFormOptions: VbenFormProps = {
   submitOnEnter: true,
 };
 
-function normalizeText(input: unknown) {
-  return String(input ?? '').trim().toLowerCase();
-}
-
-function filterBooks(formValues: Record<string, any>) {
-  const title = normalizeText(formValues.title);
-  const author = normalizeText(formValues.author);
-  const isbn = normalizeText(formValues.isbn);
-  const category = String(formValues.category ?? '').trim();
-  const status = (formValues.status ?? 'all') as BookStatus;
-
-  return books.value.filter((book) => {
-    if (title && !normalizeText(book.title).includes(title)) return false;
-    if (author && !normalizeText(book.author).includes(author)) return false;
-    if (isbn && !normalizeText(book.isbn).includes(isbn)) return false;
-    if (category && book.category !== category) return false;
-    if (status === 'normal' && book.is_deleted) return false;
-    if (status === 'deleted' && !book.is_deleted) return false;
-    return true;
-  });
-}
-
 const COVER_PLACEHOLDER_SRC = '/covers/cover-placeholder.svg';
+const coverLoadFailedIsbns = ref<Set<string>>(new Set());
 
 function getCoverSrc(url: string) {
   return url?.trim() ? url : COVER_PLACEHOLDER_SRC;
+}
+
+function markCoverLoadFailed(isbn: string) {
+  const normalized = String(isbn ?? '').trim();
+  if (!normalized) return;
+  if (coverLoadFailedIsbns.value.has(normalized)) return;
+  coverLoadFailedIsbns.value = new Set([...coverLoadFailedIsbns.value, normalized]);
+}
+
+function getTableCoverSrc(row: Book) {
+  if (coverLoadFailedIsbns.value.has(row.isbn)) return COVER_PLACEHOLDER_SRC;
+  return getCoverSrc(row.cover_url);
 }
 
 function resolveFileUrl(file?: UploadFile) {
@@ -395,6 +297,36 @@ function resolveFileUrl(file?: UploadFile) {
   const raw = (file as any).raw as File | undefined;
   if (raw) return getOrCreateManagedObjectUrl(raw);
   return '';
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read file failed'));
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function resolveCoverUrlForSubmit(coverFile?: UploadFile) {
+  if (!coverFile) return '';
+
+  const responseUrl = (coverFile.response as any)?.url;
+  if (typeof responseUrl === 'string' && responseUrl.trim()) {
+    return responseUrl.trim();
+  }
+
+  const url = (coverFile as any)?.url;
+  if (typeof url === 'string' && url.trim() && !url.startsWith('blob:')) {
+    return url.trim();
+  }
+
+  const raw = (coverFile as any).raw as File | undefined;
+  if (!raw) return '';
+
+  const dataUrl = await fileToDataUrl(raw);
+  const result = await uploadApi({ dataUrl });
+  return String(result?.url ?? '').trim();
 }
 
 function onCoverUploadPreview(file: UploadFile) {
@@ -480,14 +412,33 @@ const gridOptions: VxeGridProps<Book> = {
   cellConfig: {
     height: 160,
   },
+  seqConfig: {
+    seqMethod: ({ rowIndex }) => {
+      const currentPage = Math.max(1, Number(gridPager.value.currentPage) || 1);
+      const pageSize = Math.max(1, Number(gridPager.value.pageSize) || 20);
+      return rowIndex + 1 + (currentPage - 1) * pageSize;
+    },
+  },
   pagerConfig: {},
   proxyConfig: {
     ajax: {
       query: async ({ page }, formValues) => {
-        const filtered = filterBooks(formValues);
-        const start = (page.currentPage - 1) * page.pageSize;
-        const end = start + page.pageSize;
-        return { items: filtered.slice(start, end), total: filtered.length };
+        gridPager.value = {
+          currentPage: page.currentPage,
+          pageSize: page.pageSize,
+        };
+        const result = await listBooksApi({
+          author: formValues.author,
+          category: formValues.category,
+          isbn: formValues.isbn,
+          page: page.currentPage,
+          pageSize: page.pageSize,
+          sortBy: 'created_at',
+          sortOrder: 'desc',
+          status: (formValues.status ?? 'all') as BookStatus,
+          title: formValues.title,
+        });
+        return result;
       },
     },
   },
@@ -542,6 +493,7 @@ function onCreate() {
   drawerMode.value = 'create';
   drawerActiveTab.value = 'manual';
   editingOriginalIsbn.value = null;
+  editingOriginalCoverUrl.value = null;
   uploadFileList.value = [];
   drawerApi.setState({ confirmText: drawerConfirmText.value });
   drawerApi.open();
@@ -567,6 +519,7 @@ function onEdit(row: Book) {
   drawerMode.value = 'edit';
   drawerActiveTab.value = 'manual';
   editingOriginalIsbn.value = row.isbn;
+  editingOriginalCoverUrl.value = row.cover_url;
   drawerApi.setState({ confirmText: drawerConfirmText.value });
   drawerApi.open();
   nextTick(() => {
@@ -579,7 +532,7 @@ function onEdit(row: Book) {
             name: '封面',
             status: 'success',
             uid: row.isbn,
-            url: getCoverSrc(row.cover_url),
+            url: getTableCoverSrc(row),
           } as any,
         ],
         current_stock: row.current_stock,
@@ -605,11 +558,7 @@ async function onDownShelf(row: Book) {
     return;
   }
 
-  const index = books.value.findIndex((b) => b.isbn === row.isbn);
-  if (index < 0) return;
-  const existing = books.value[index];
-  if (!existing) return;
-  books.value[index] = { ...existing, is_deleted: true };
+  await setBookShelfApi(row.isbn, true);
   ElMessage.success('已下架');
   refresh();
 }
@@ -626,11 +575,7 @@ async function onUpShelf(row: Book) {
     return;
   }
 
-  const index = books.value.findIndex((b) => b.isbn === row.isbn);
-  if (index < 0) return;
-  const existing = books.value[index];
-  if (!existing) return;
-  books.value[index] = { ...existing, is_deleted: false };
+  await setBookShelfApi(row.isbn, false);
   ElMessage.success('已上架');
   refresh();
 }
@@ -662,50 +607,44 @@ async function onDrawerConfirm() {
 
   const { cover_files: coverFiles, ...bookValues } = values;
   const coverFile = coverFiles?.[0];
-  const coverUrl = resolveFileUrl(coverFile) || COVER_PLACEHOLDER_SRC;
+
+  let coverUrl = '';
+  try {
+    coverUrl = (await resolveCoverUrlForSubmit(coverFile)) || COVER_PLACEHOLDER_SRC;
+  } catch {
+    return;
+  }
 
   if (bookValues.current_stock > bookValues.total_stock) {
     ElMessage.error('当前可借数量不能大于总库存');
     return;
   }
 
-  if (drawerMode.value === 'create') {
-    const existed = books.value.some((b) => b.isbn === bookValues.isbn);
-    if (existed) {
-      ElMessage.error('ISBN 已存在，请更换');
-      return;
-    }
-    books.value.unshift({
-      ...bookValues,
-      cover_url: coverUrl,
-      created_at: new Date().toISOString(),
-      is_deleted: false,
-    });
-    retainCoverObjectUrl(coverUrl);
-    ElMessage.success('新增成功（静态）');
-  } else {
-    const originalIsbn = editingOriginalIsbn.value;
-    if (!originalIsbn) return;
+  const payload: BooksApi.UpsertBody = {
+    ...bookValues,
+    cover_url: coverUrl,
+  };
 
-    const existed = books.value.some(
-      (b) => b.isbn === bookValues.isbn && b.isbn !== originalIsbn,
-    );
-    if (existed) {
-      ElMessage.error('ISBN 已存在，请更换');
-      return;
+  try {
+    if (drawerMode.value === 'create') {
+      await createBookApi(payload);
+      retainCoverObjectUrl(coverUrl);
+      ElMessage.success('入库成功');
+    } else {
+      const originalIsbn = editingOriginalIsbn.value;
+      if (!originalIsbn) return;
+      await updateBookApi(originalIsbn, payload);
+      const originalCoverUrl = editingOriginalCoverUrl.value;
+      if (originalCoverUrl && originalCoverUrl !== coverUrl) {
+        releaseCoverObjectUrl(originalCoverUrl);
+      }
+      retainCoverObjectUrl(coverUrl);
+      editingOriginalIsbn.value = payload.isbn;
+      editingOriginalCoverUrl.value = payload.cover_url;
+      ElMessage.success('编辑成功');
     }
-
-    const index = books.value.findIndex((b) => b.isbn === originalIsbn);
-    if (index < 0) return;
-    const existing = books.value[index];
-    if (!existing) return;
-    if (existing.cover_url !== coverUrl) {
-      releaseCoverObjectUrl(existing.cover_url);
-    }
-    books.value[index] = { ...existing, ...bookValues, cover_url: coverUrl };
-    retainCoverObjectUrl(coverUrl);
-    editingOriginalIsbn.value = bookValues.isbn;
-    ElMessage.success('编辑成功（静态）');
+  } catch {
+    return;
   }
 
   drawerApi.close();
@@ -777,12 +716,13 @@ onBeforeUnmount(() => {
       <template #cover-url="{ row }">
         <div class="flex items-center justify-center py-2">
           <ElImage
-            :src="getCoverSrc(row.cover_url)"
-            :preview-src-list="[getCoverSrc(row.cover_url)]"
+            :src="getTableCoverSrc(row)"
+            :preview-src-list="[getTableCoverSrc(row)]"
             :preview-teleported="true"
             class="cursor-pointer"
             fit="cover"
             style="width: 96px; height: 128px"
+            @error="markCoverLoadFailed(row.isbn)"
           />
         </div>
       </template>

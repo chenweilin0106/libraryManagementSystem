@@ -24,25 +24,25 @@ import {
 
 import { useVbenForm } from '#/adapter/form';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
+import type { UsersApi } from '#/api';
+import {
+  createUserApi,
+  deleteUserApi,
+  listUsersApi,
+  resetUserPasswordApi,
+  updateUserApi,
+} from '#/api';
 
 defineOptions({ name: 'Users' });
 
-type UserRole = 'admin' | 'user';
-type UserStatus = 0 | 1;
-
-interface User {
-  _id: string;
-  avatar?: string;
-  created_at: string;
-  credit_score: number;
-  password: string;
-  role: UserRole;
-  status: UserStatus;
-  username: string;
-}
+type UserRole = UsersApi.UserRole;
+type UserStatus = UsersApi.UserStatus;
+type User = UsersApi.User;
 
 const DEFAULT_PASSWORD = '123456';
 const AVATAR_PLACEHOLDER_SRC = '/avatars/avatar-placeholder.svg';
+const PROTECTED_USERNAMES = new Set(['admin', 'vben']);
+const gridPager = ref({ currentPage: 1, pageSize: 20 });
 
 const ROLE_OPTIONS: Array<{ label: string; value: UserRole | 'all' }> = [
   { label: '全部', value: 'all' },
@@ -56,54 +56,10 @@ const STATUS_OPTIONS: Array<{ label: string; value: UserStatus | 'all' }> = [
   { label: '冻结', value: 0 },
 ];
 
-const users = ref<User[]>([
-  {
-    _id: 'U-1001',
-    avatar: AVATAR_PLACEHOLDER_SRC,
-    created_at: '2026-01-05T10:00:00.000Z',
-    credit_score: 100,
-    password: DEFAULT_PASSWORD,
-    role: 'admin',
-    status: 1,
-    username: 'admin',
-  },
-  {
-    _id: 'U-1002',
-    avatar: AVATAR_PLACEHOLDER_SRC,
-    created_at: '2026-01-08T08:30:00.000Z',
-    credit_score: 100,
-    password: DEFAULT_PASSWORD,
-    role: 'user',
-    status: 1,
-    username: 'vben',
-  },
-  {
-    _id: 'U-1003',
-    avatar: AVATAR_PLACEHOLDER_SRC,
-    created_at: '2026-01-10T12:20:00.000Z',
-    credit_score: 90,
-    password: DEFAULT_PASSWORD,
-    role: 'user',
-    status: 0,
-    username: 'reader01',
-  },
-  {
-    _id: 'U-1004',
-    avatar: AVATAR_PLACEHOLDER_SRC,
-    created_at: '2026-01-15T09:12:00.000Z',
-    credit_score: 100,
-    password: DEFAULT_PASSWORD,
-    role: 'user',
-    status: 1,
-    username: 'reader02',
-  },
-]);
-
-const userSeq = ref(1005);
-
 const avatarPreviewOpen = ref(false);
 const avatarPreviewUrl = ref<string>('');
 const uploadExcelFileList = ref<any[]>([]);
+const avatarLoadFailedIds = ref<Set<string>>(new Set());
 
 // vben-form 托管 Upload 的 fileList，这里管理 object url，避免替换/关闭抽屉后内存泄漏
 const managedObjectUrls = new Set<string>();
@@ -176,6 +132,22 @@ function resolveFileUrl(file?: UploadFile | UploadUserFile) {
   return '';
 }
 
+function isProtectedUser(user: Pick<User, 'username'>) {
+  return PROTECTED_USERNAMES.has(normalizeText(user.username));
+}
+
+function markAvatarLoadFailed(id: string) {
+  const normalized = String(id ?? '').trim();
+  if (!normalized) return;
+  if (avatarLoadFailedIds.value.has(normalized)) return;
+  avatarLoadFailedIds.value = new Set([...avatarLoadFailedIds.value, normalized]);
+}
+
+function getRowAvatarSrc(row: User) {
+  if (avatarLoadFailedIds.value.has(row._id)) return AVATAR_PLACEHOLDER_SRC;
+  return row.avatar || AVATAR_PLACEHOLDER_SRC;
+}
+
 function onAvatarUploadPreview(file: UploadFile) {
   const url = resolveFileUrl(file);
   if (!url) return;
@@ -232,8 +204,23 @@ function toMs(value: unknown) {
   const str = String(value).trim();
   if (!str) return null;
 
-  const normalized = str.replace('T', ' ').replace(/\//g, '-');
-  const asDate = new Date(normalized);
+  // 约定：按“本地时区”解析，避免 YYYY-MM-DD 被当成 UTC 导致跨天误差
+  const normalized = str.replace(/\//g, '-');
+  const m = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
+  );
+  if (m) {
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    const hour = m[4] ? Number(m[4]) : 0;
+    const minute = m[5] ? Number(m[5]) : 0;
+    const second = m[6] ? Number(m[6]) : 0;
+    const ms = new Date(year, month - 1, day, hour, minute, second).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  const asDate = new Date(str);
   const ms = asDate.getTime();
   return Number.isFinite(ms) ? ms : null;
 }
@@ -250,28 +237,6 @@ function normalizeRange(range: unknown) {
     return [startMs, endMs + 24 * 60 * 60 * 1000 - 1] as const;
   }
   return [startMs, endMs] as const;
-}
-
-function filterUsers(formValues: Record<string, any>) {
-  const username = normalizeText(formValues.username);
-  const role = String(formValues.role ?? 'all') as UserRole | 'all';
-  const status = (formValues.status ?? 'all') as UserStatus | 'all';
-  const createdRange = normalizeRange(formValues.created_at_range);
-
-  return users.value
-    .filter((user) => {
-      if (username && !normalizeText(user.username).includes(username)) return false;
-      if (role !== 'all' && user.role !== role) return false;
-      if (status !== 'all' && user.status !== status) return false;
-
-      if (createdRange) {
-        const ms = toMs(user.created_at);
-        if (ms === null || ms < createdRange[0] || ms > createdRange[1]) return false;
-      }
-
-      return true;
-    })
-    .sort((a, b) => (toMs(b.created_at) ?? 0) - (toMs(a.created_at) ?? 0));
 }
 
 const gridFormOptions: VbenFormProps = {
@@ -376,14 +341,32 @@ const gridOptions: VxeGridProps<User> = {
   ],
   height: 'auto',
   keepSource: true,
+  seqConfig: {
+    seqMethod: ({ rowIndex }) => {
+      const currentPage = Math.max(1, Number(gridPager.value.currentPage) || 1);
+      const pageSize = Math.max(1, Number(gridPager.value.pageSize) || 20);
+      return rowIndex + 1 + (currentPage - 1) * pageSize;
+    },
+  },
   pagerConfig: {},
   proxyConfig: {
     ajax: {
       query: async ({ page }, formValues) => {
-        const filtered = filterUsers(formValues);
-        const start = (page.currentPage - 1) * page.pageSize;
-        const end = start + page.pageSize;
-        return { items: filtered.slice(start, end), total: filtered.length };
+        gridPager.value = {
+          currentPage: page.currentPage,
+          pageSize: page.pageSize,
+        };
+
+        const createdRange = normalizeRange(formValues.created_at_range);
+        return listUsersApi({
+          createdEnd: createdRange?.[1],
+          createdStart: createdRange?.[0],
+          page: page.currentPage,
+          pageSize: page.pageSize,
+          role: String(formValues.role ?? 'all') as UserRole | 'all',
+          status: (formValues.status ?? 'all') as UserStatus | 'all',
+          username: formValues.username,
+        });
       },
     },
   },
@@ -419,22 +402,28 @@ const drawerConfirmText = computed(() => {
 
 const editingOriginalId = ref<string | null>(null);
 const editingStatus = ref<UserStatus>(1);
+const editingProtected = ref(false);
+const editingOriginalAvatarUrl = ref<string>('');
 
 const userFormSchema: VbenFormSchema[] = [
   {
     component: 'Input',
-    componentProps: { placeholder: '请输入用户名' },
+    componentProps: () => ({
+      disabled: drawerMode.value === 'edit' && editingProtected.value,
+      placeholder: '请输入用户名',
+    }),
     fieldName: 'username',
     label: '用户名',
     rules: 'required',
   },
   {
     component: 'Select',
-    componentProps: {
+    componentProps: () => ({
       clearable: false,
+      disabled: drawerMode.value === 'edit' && editingProtected.value,
       options: ROLE_OPTIONS.filter((o) => o.value !== 'all'),
       placeholder: '请选择角色',
-    },
+    }),
     fieldName: 'role',
     label: '角色',
     rules: 'selectRequired',
@@ -497,16 +486,13 @@ watch(drawerConfirmText, (text) => {
   drawerApi.setState({ confirmText: text });
 });
 
-function createNewId() {
-  const next = userSeq.value++;
-  return `U-${next}`;
-}
-
 function onCreate() {
   drawerMode.value = 'create';
   drawerActiveTab.value = 'manual';
   editingOriginalId.value = null;
   editingStatus.value = 1;
+  editingProtected.value = false;
+  editingOriginalAvatarUrl.value = '';
   uploadExcelFileList.value = [];
   drawerApi.setState({ confirmText: drawerConfirmText.value });
   drawerApi.open();
@@ -530,6 +516,8 @@ function onEdit(row: User) {
   drawerActiveTab.value = 'manual';
   editingOriginalId.value = row._id;
   editingStatus.value = row.status;
+  editingProtected.value = isProtectedUser(row);
+  editingOriginalAvatarUrl.value = row.avatar || '';
   drawerApi.setState({ confirmText: drawerConfirmText.value });
   drawerApi.open();
   nextTick(() => {
@@ -540,7 +528,7 @@ function onEdit(row: User) {
             name: '头像',
             status: 'success',
             uid: row._id,
-            url: row.avatar || AVATAR_PLACEHOLDER_SRC,
+            url: getRowAvatarSrc(row),
           } as any,
         ],
         credit_score: row.credit_score ?? 100,
@@ -587,56 +575,33 @@ async function onDrawerConfirm() {
     return;
   }
 
-  if (drawerMode.value === 'create') {
-    const existed = users.value.some((u) => normalizeText(u.username) === normalizeText(username));
-    if (existed) {
-      ElMessage.error('用户名已存在，请更换');
-      return;
+  const payload: UsersApi.UpsertBody = {
+    avatar: avatarUrl,
+    credit_score: creditScore,
+    role,
+    status: editingStatus.value,
+    username,
+  };
+
+  try {
+    if (drawerMode.value === 'create') {
+      await createUserApi(payload);
+      retainAvatarObjectUrl(avatarUrl);
+      ElMessage.success('新增成功');
+    } else {
+      const originalId = editingOriginalId.value;
+      if (!originalId) return;
+      await updateUserApi(originalId, payload);
+      const originalAvatar = editingOriginalAvatarUrl.value;
+      if (originalAvatar && originalAvatar !== avatarUrl) {
+        releaseAvatarObjectUrl(originalAvatar);
+      }
+      retainAvatarObjectUrl(avatarUrl);
+      editingOriginalAvatarUrl.value = avatarUrl;
+      ElMessage.success('编辑成功');
     }
-
-    users.value.unshift({
-      _id: createNewId(),
-      avatar: avatarUrl,
-      created_at: new Date().toISOString(),
-      credit_score: creditScore,
-      password: DEFAULT_PASSWORD,
-      role,
-      status: editingStatus.value,
-      username,
-    });
-    retainAvatarObjectUrl(avatarUrl);
-    ElMessage.success('新增成功（静态）');
-  } else {
-    const originalId = editingOriginalId.value;
-    if (!originalId) return;
-
-    const existed = users.value.some(
-      (u) => normalizeText(u.username) === normalizeText(username) && u._id !== originalId,
-    );
-    if (existed) {
-      ElMessage.error('用户名已存在，请更换');
-      return;
-    }
-
-    const index = users.value.findIndex((u) => u._id === originalId);
-    if (index < 0) return;
-    const existing = users.value[index];
-    if (!existing) return;
-
-    const existingAvatar = existing.avatar || '';
-    if (existingAvatar && existingAvatar !== avatarUrl) {
-      releaseAvatarObjectUrl(existingAvatar);
-    }
-    users.value[index] = {
-      ...existing,
-      avatar: avatarUrl,
-      credit_score: creditScore,
-      role,
-      status: editingStatus.value,
-      username,
-    };
-    retainAvatarObjectUrl(avatarUrl);
-    ElMessage.success('编辑成功（静态）');
+  } catch {
+    return;
   }
 
   drawerApi.close();
@@ -644,6 +609,10 @@ async function onDrawerConfirm() {
 }
 
 async function onResetPassword(row: User) {
+  if (isProtectedUser(row)) {
+    ElMessage.warning('内置账号禁止重置密码');
+    return;
+  }
   try {
     await ElMessageBox.confirm(
       `确认重置用户“${row.username}”的密码为 ${DEFAULT_PASSWORD} 吗？`,
@@ -657,16 +626,19 @@ async function onResetPassword(row: User) {
   } catch {
     return;
   }
-
-  const index = users.value.findIndex((u) => u._id === row._id);
-  if (index < 0) return;
-  const existing = users.value[index];
-  if (!existing) return;
-  users.value[index] = { ...existing, password: DEFAULT_PASSWORD };
-  ElMessage.success(`已重置密码为 ${DEFAULT_PASSWORD}（静态）`);
+  try {
+    await resetUserPasswordApi(row._id);
+    ElMessage.success(`已重置密码为 ${DEFAULT_PASSWORD}`);
+  } catch {
+    return;
+  }
 }
 
 async function onDelete(row: User) {
+  if (isProtectedUser(row)) {
+    ElMessage.warning('内置账号禁止删除');
+    return;
+  }
   try {
     await ElMessageBox.confirm(`确认删除用户“${row.username}”吗？`, '删除确认', {
       confirmButtonText: '确认删除',
@@ -676,16 +648,16 @@ async function onDelete(row: User) {
   } catch {
     return;
   }
-
-  const index = users.value.findIndex((u) => u._id === row._id);
-  if (index < 0) return;
-  const existing = users.value[index];
-  if (existing?.avatar) {
-    releaseAvatarObjectUrl(existing.avatar);
+  try {
+    await deleteUserApi(row._id);
+    if (row.avatar) {
+      releaseAvatarObjectUrl(row.avatar);
+    }
+    ElMessage.success('删除成功');
+    refresh();
+  } catch {
+    return;
   }
-  users.value.splice(index, 1);
-  ElMessage.success('删除成功（静态）');
-  refresh();
 }
 
 onBeforeUnmount(() => {
@@ -721,6 +693,7 @@ onBeforeUnmount(() => {
                 :inactive-value="0"
                 active-text="正常"
                 inactive-text="冻结"
+                :disabled="drawerMode === 'edit' && editingProtected"
                 inline-prompt
               />
             </div>
@@ -776,12 +749,13 @@ onBeforeUnmount(() => {
       <template #avatar="{ row }">
         <div class="flex items-center justify-center">
           <ElImage
-            :src="row.avatar || AVATAR_PLACEHOLDER_SRC"
-            :preview-src-list="[row.avatar || AVATAR_PLACEHOLDER_SRC]"
+            :src="getRowAvatarSrc(row)"
+            :preview-src-list="[getRowAvatarSrc(row)]"
             :preview-teleported="true"
             class="cursor-pointer"
             fit="cover"
             style="height: 32px; width: 32px; border-radius: 9999px"
+            @error="markAvatarLoadFailed(row._id)"
           />
         </div>
       </template>
@@ -801,8 +775,22 @@ onBeforeUnmount(() => {
       <template #actions="{ row }">
         <div class="flex items-center justify-center gap-2">
           <ElButton link type="primary" @click="onEdit(row)">编辑</ElButton>
-          <ElButton link type="warning" @click="onResetPassword(row)">重置密码</ElButton>
-          <ElButton link type="danger" @click="onDelete(row)">删除</ElButton>
+          <ElButton
+            :disabled="isProtectedUser(row)"
+            link
+            type="warning"
+            @click="onResetPassword(row)"
+          >
+            重置密码
+          </ElButton>
+          <ElButton
+            :disabled="isProtectedUser(row)"
+            link
+            type="danger"
+            @click="onDelete(row)"
+          >
+            删除
+          </ElButton>
         </div>
       </template>
     </Grid>

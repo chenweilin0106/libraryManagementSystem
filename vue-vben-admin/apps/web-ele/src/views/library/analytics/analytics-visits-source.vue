@@ -1,14 +1,22 @@
 <script lang="ts" setup>
 import type { EchartsUIType } from '@vben/plugins/echarts';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 
 import { EchartsUI, useEcharts } from '@vben/plugins/echarts';
+
+const props = defineProps<{
+  offline: number;
+  online: number;
+}>();
 
 const chartRef = ref<EchartsUIType>();
 const { renderEcharts } = useEcharts(chartRef);
 
-onMounted(() => {
+function render() {
+  const online = Number(props.online) || 0;
+  const offline = Number(props.offline) || 0;
+
   renderEcharts({
     legend: {
       bottom: '2%',
@@ -24,8 +32,8 @@ onMounted(() => {
         avoidLabelOverlap: false,
         color: ['#5ab1ef', '#b6a2de', '#67e0e3', '#2ec7c9'],
         data: [
-          { name: '线上', value: 60 },
-          { name: '线下', value: 40 },
+          { name: '线上', value: online },
+          { name: '线下', value: offline },
         ],
         emphasis: {
           label: {
@@ -55,7 +63,18 @@ onMounted(() => {
       trigger: 'item',
     },
   });
+}
+
+onMounted(() => {
+  render();
 });
+
+watch(
+  () => [props.online, props.offline],
+  () => {
+    render();
+  },
+);
 </script>
 
 <template>

@@ -4,6 +4,12 @@ process.env.COMPATIBILITY_DATE = new Date().toISOString();
 export default defineNitroConfig({
   devErrorHandler: errorHandler,
   errorHandler: '~/error',
+  esbuild: {
+    options: {
+      // 允许 BigInt 字面量（如 123n），避免默认 target=es2019 的构建警告
+      target: 'es2020',
+    },
+  },
   routeRules: {
     '/api/**': {
       cors: true,

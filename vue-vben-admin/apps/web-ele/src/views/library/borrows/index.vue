@@ -17,73 +17,20 @@ import {
 
 import { useVbenForm, z } from '#/adapter/form';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
+import type { BorrowsApi } from '#/api';
+import {
+  borrowBookApi,
+  getBookByIsbnApi,
+  listBorrowsApi,
+  returnBookApi,
+} from '#/api';
 
 defineOptions({ name: 'Borrows' });
 
-type BorrowStatus = 'borrowed' | 'canceled' | 'overdue' | 'reserved' | 'returned';
+type BorrowStatus = BorrowsApi.BorrowStatus;
+type BorrowRecord = BorrowsApi.BorrowRecord;
 
-interface MockBook {
-  book_id: string;
-  isbn: string;
-  title: string;
-}
-
-interface BorrowRecord {
-  book_id: string;
-  book_title: string;
-  borrow_date: string;
-  borrow_days: number;
-  due_date: string;
-  fine_amount: number;
-  isbn: string;
-  record_id: string;
-  return_date?: string;
-  status: BorrowStatus;
-  user_id: string;
-  username: string;
-}
-
-const mockBooks = ref<MockBook[]>([
-  { book_id: 'B-1001', isbn: '9787302423287', title: '算法导论（第三版）' },
-  { book_id: 'B-1002', isbn: '9787111128069', title: '深入理解计算机系统（第三版）' },
-  { book_id: 'B-1003', isbn: '9787115428028', title: 'Vue.js 设计与实现' },
-]);
-
-const records = ref<BorrowRecord[]>([
-  {
-    book_id: 'B-1003',
-    book_title: 'Vue.js 设计与实现',
-    borrow_date: '2026-02-01 10:00:00',
-    borrow_days: 30,
-    due_date: '2026-03-03 10:00:00',
-    fine_amount: 0,
-    isbn: '9787115428028',
-    record_id: 'BRW-000001',
-    status: 'borrowed',
-    user_id: 'U-1001',
-    username: 'admin',
-  },
-  {
-    book_id: 'B-1001',
-    book_title: '算法导论（第三版）',
-    borrow_date: '2026-01-10 09:20:00',
-    borrow_days: 14,
-    due_date: '2026-01-24 09:20:00',
-    fine_amount: 0,
-    isbn: '9787302423287',
-    record_id: 'BRW-000002',
-    return_date: '2026-01-20 16:30:00',
-    status: 'returned',
-    user_id: 'U-1002',
-    username: 'vben',
-  },
-]);
-
-const recordSeq = ref(3);
-
-function normalizeText(input: unknown) {
-  return String(input ?? '').trim().toLowerCase();
-}
+const gridPager = ref({ currentPage: 1, pageSize: 20 });
 
 function pad2(num: number) {
   return String(num).padStart(2, '0');
@@ -106,9 +53,24 @@ function toMs(value: unknown) {
   const str = String(value).trim();
   if (!str) return null;
 
-  // 支持 YYYY-MM-DD / YYYY-MM-DD HH:mm:ss
-  const normalized = str.replace('T', ' ').replace(/\//g, '-');
-  const asDate = new Date(normalized);
+  // 约定：按“本地时区”解析，避免 YYYY-MM-DD 被当成 UTC 导致跨天误差
+  const normalized = str.replace(/\//g, '-');
+  const m = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
+  );
+  if (m) {
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    const hour = m[4] ? Number(m[4]) : 0;
+    const minute = m[5] ? Number(m[5]) : 0;
+    const second = m[6] ? Number(m[6]) : 0;
+    const ms = new Date(year, month - 1, day, hour, minute, second).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  // 兜底：解析 ISO / 其他格式
+  const asDate = new Date(str);
   const ms = asDate.getTime();
   return Number.isFinite(ms) ? ms : null;
 }
@@ -139,34 +101,6 @@ function getEffectiveStatus(record: BorrowRecord): BorrowStatus {
 function canReturn(record: BorrowRecord) {
   const status = getEffectiveStatus(record);
   return status === 'borrowed' || status === 'overdue' || status === 'reserved';
-}
-
-function filterRecords(formValues: Record<string, any>) {
-  const username = normalizeText(formValues.username);
-  const isbn = normalizeText(formValues.isbn);
-  const status = String(formValues.status ?? 'all');
-  const borrowRange = normalizeRange(formValues.borrow_date_range);
-  const returnRange = normalizeRange(formValues.return_date_range);
-
-  return records.value.filter((record) => {
-    if (username && !normalizeText(record.username).includes(username)) return false;
-    if (isbn && !normalizeText(record.isbn).includes(isbn)) return false;
-
-    const effectiveStatus = getEffectiveStatus(record);
-    if (status !== 'all' && effectiveStatus !== status) return false;
-
-    if (borrowRange) {
-      const ms = toMs(record.borrow_date);
-      if (ms === null || ms < borrowRange[0] || ms > borrowRange[1]) return false;
-    }
-
-    if (returnRange) {
-      const ms = toMs(record.return_date);
-      if (ms === null || ms < returnRange[0] || ms > returnRange[1]) return false;
-    }
-
-    return true;
-  });
 }
 
 const STATUS_OPTIONS: Array<{ label: string; value: BorrowStatus | 'all' }> = [
@@ -278,14 +212,36 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
   ],
   height: 'auto',
   keepSource: true,
+  seqConfig: {
+    seqMethod: ({ rowIndex }) => {
+      const currentPage = Math.max(1, Number(gridPager.value.currentPage) || 1);
+      const pageSize = Math.max(1, Number(gridPager.value.pageSize) || 20);
+      return rowIndex + 1 + (currentPage - 1) * pageSize;
+    },
+  },
   pagerConfig: {},
   proxyConfig: {
     ajax: {
       query: async ({ page }, formValues) => {
-        const filtered = filterRecords(formValues);
-        const start = (page.currentPage - 1) * page.pageSize;
-        const end = start + page.pageSize;
-        return { items: filtered.slice(start, end), total: filtered.length };
+        gridPager.value = {
+          currentPage: page.currentPage,
+          pageSize: page.pageSize,
+        };
+
+        const borrowRange = normalizeRange(formValues.borrow_date_range);
+        const returnRange = normalizeRange(formValues.return_date_range);
+
+        return listBorrowsApi({
+          borrowEnd: borrowRange?.[1],
+          borrowStart: borrowRange?.[0],
+          isbn: formValues.isbn,
+          page: page.currentPage,
+          pageSize: page.pageSize,
+          returnEnd: returnRange?.[1],
+          returnStart: returnRange?.[0],
+          status: String(formValues.status ?? 'all') as BorrowStatus | 'all',
+          username: formValues.username,
+        });
       },
     },
   },
@@ -341,7 +297,7 @@ const borrowFormSchema: VbenFormSchema[] = [
     dependencies: {
       trigger(_values, form) {
         // vee-validate 的 setValues 默认会触发校验，这里仅做联动清空，不触发校验
-        form.setValues({ book_id: '', book_title: '' }, false);
+        form.setValues({ book_id: '', book_title: '', book_stock: 0 }, false);
       },
       triggerFields: ['isbn'],
     },
@@ -355,6 +311,16 @@ const borrowFormSchema: VbenFormSchema[] = [
             disabled: queryingBook.value,
             loading: queryingBook.value,
             type: 'primary',
+            // 仅覆盖背景色/文字色（直接写样式，确保优先级足够），其它样式尽量走默认
+            style: queryingBook.value
+              ? undefined
+              : {
+                  backgroundColor: 'var(--el-color-primary)',
+                  // 和输入框连体：左侧保持直角，右侧保留默认圆角
+                  borderBottomLeftRadius: '0px',
+                  borderTopLeftRadius: '0px',
+                  color: 'var(--el-color-white)',
+                },
             onClick: onQueryBookByIsbn,
           },
           { default: () => '查询' },
@@ -375,6 +341,12 @@ const borrowFormSchema: VbenFormSchema[] = [
     fieldName: 'book_id',
     label: '图书ID',
     rules: z.string().min(1, { message: '请先查询 ISBN' }),
+  },
+  {
+    component: 'InputNumber',
+    componentProps: { disabled: true, min: 0, placeholder: '查询后自动填充' },
+    fieldName: 'book_stock',
+    label: '当前库存',
   },
   {
     component: 'Input',
@@ -486,21 +458,19 @@ async function onQueryBookByIsbn() {
   }
   queryingBook.value = true;
   try {
-    const find = mockBooks.value.find((b) => b.isbn === trimmed);
-    if (!find) {
-      borrowFormApi.setValues({ book_id: '', book_title: '' });
-      ElMessage.error('未找到该 ISBN 对应图书（本地 mock）');
-      return;
+    try {
+      const find = await getBookByIsbnApi(trimmed);
+      borrowFormApi.setValues({
+        book_id: find.book_id,
+        book_stock: find.current_stock ?? 0,
+        book_title: find.title ?? '',
+      });
+    } catch {
+      borrowFormApi.setValues({ book_id: '', book_title: '', book_stock: 0 });
     }
-    borrowFormApi.setValues({ book_id: find.book_id, book_title: find.title });
   } finally {
     queryingBook.value = false;
   }
-}
-
-function buildRecordId() {
-  const next = recordSeq.value++;
-  return `BRW-${String(next).padStart(6, '0')}`;
 }
 
 function openBorrowDrawer() {
@@ -518,6 +488,7 @@ function openBorrowDrawer() {
       isbn: '',
       book_id: '',
       book_title: '',
+      book_stock: 0,
       username: '',
     });
     borrowFormApi.resetValidate();
@@ -545,7 +516,7 @@ function openReturnDrawer(record: BorrowRecord) {
   });
 }
 
-function handleBorrowSubmit(values: Record<string, any>) {
+async function tryBorrow(values: Record<string, any>) {
   const isbn = String(values.isbn ?? '').trim();
   const username = String(values.username ?? '').trim();
   const bookId = String(values.book_id ?? '').trim();
@@ -556,65 +527,72 @@ function handleBorrowSubmit(values: Record<string, any>) {
 
   if (!bookId || !bookTitle) {
     ElMessage.warning('请先查询 ISBN 获取图书信息');
-    return;
+    return false;
   }
 
-  records.value.unshift({
-    book_id: bookId,
-    book_title: bookTitle,
-    borrow_date: borrowDate,
-    borrow_days: borrowDays,
-    due_date: dueDate || borrowDate,
-    fine_amount: 0,
-    isbn,
-    record_id: buildRecordId(),
-    status: 'borrowed',
-    user_id: `U-${Math.floor(Math.random() * 9000 + 1000)}`,
-    username,
-  });
+  try {
+    const { book } = await borrowBookApi({
+      borrow_date: borrowDate,
+      borrow_days: borrowDays,
+      due_date: dueDate || borrowDate,
+      isbn,
+      username,
+    });
 
-  ElMessage.success('借书成功（示例）');
-  refresh();
+    const currentStock = (book as any)?.current_stock;
+    if (typeof currentStock === 'number') {
+      borrowFormApi.setValues({ book_stock: currentStock });
+    }
+
+    ElMessage.success('借书成功');
+    refresh();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function handleReturnSubmit(values: Record<string, any>) {
+async function handleBorrowSubmit(values: Record<string, any>) {
+  await tryBorrow(values);
+}
+
+async function tryReturn(values: Record<string, any>) {
   const recordId = String(values.record_id ?? '').trim();
   const returnDate = String(values.return_date ?? '').trim();
   const fineAmount = Number(values.fine_amount ?? 0);
 
-  const idx = records.value.findIndex((r) => r.record_id === recordId);
-  if (idx < 0) {
-    ElMessage.error('未找到对应借阅记录');
-    return;
+  try {
+    await returnBookApi(recordId, {
+      fine_amount: Number.isFinite(fineAmount) ? fineAmount : 0,
+      return_date: returnDate,
+    });
+    ElMessage.success('还书成功');
+    refresh();
+    return true;
+  } catch {
+    return false;
   }
+}
 
-  const existing = records.value[idx];
-  if (!existing) return;
-
-  if (!canReturn(existing)) {
-    ElMessage.info('该记录不可还书');
-    return;
-  }
-
-  records.value[idx] = {
-    ...existing,
-    fine_amount: Number.isFinite(fineAmount) ? fineAmount : 0,
-    return_date: returnDate,
-    status: 'returned',
-  };
-
-  ElMessage.success('还书成功（示例）');
-  refresh();
+async function handleReturnSubmit(values: Record<string, any>) {
+  await tryReturn(values);
 }
 
 async function onDrawerConfirm() {
-  const submitted =
-    drawerMode.value === 'borrow'
-      ? await borrowFormApi.validateAndSubmitForm()
-      : await returnFormApi.validateAndSubmitForm();
+  if (drawerMode.value === 'borrow') {
+    const { valid } = await borrowFormApi.validate();
+    if (!valid) return;
+    const values = await borrowFormApi.getValues();
+    const ok = await tryBorrow(values);
+    if (ok) drawerApi.close();
+    return;
+  }
 
-  if (!submitted) return;
-  drawerApi.close();
+  const { valid } = await returnFormApi.validate();
+  if (!valid) return;
+  const values = await returnFormApi.getValues();
+  const ok = await tryReturn(values);
+  if (ok) drawerApi.close();
 }
 
 const [Drawer, drawerApi] = useVbenDrawer({

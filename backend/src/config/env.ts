@@ -21,5 +21,8 @@ export const env = {
   port: readIntEnv('PORT', 3000),
   mongodbUri: readEnv('MONGODB_URI', 'mongodb://127.0.0.1:27017'),
   mongodbDb: readEnv('MONGODB_DB', 'library'),
+  accessTokenTtlSeconds: readIntEnv('ACCESS_TOKEN_TTL_SECONDS', 60 * 60),
+  refreshTokenTtlSeconds: readIntEnv('REFRESH_TOKEN_TTL_SECONDS', 7 * 24 * 60 * 60),
+  refreshTokenCookieName: readEnv('REFRESH_TOKEN_COOKIE_NAME', 'refreshToken'),
+  seedDemoData: readEnv('SEED_DEMO_DATA', '1') === '1',
 } as const;
-

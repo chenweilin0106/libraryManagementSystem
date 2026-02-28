@@ -1,14 +1,29 @@
 <script lang="ts" setup>
 import type { EchartsUIType } from '@vben/plugins/echarts';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 
 import { EchartsUI, useEcharts } from '@vben/plugins/echarts';
+
+const props = defineProps<{
+  current: number[];
+  previous: number[];
+}>();
 
 const chartRef = ref<EchartsUIType>();
 const { renderEcharts } = useEcharts(chartRef);
 
-onMounted(() => {
+function normalize4(values: number[]) {
+  const src = Array.isArray(values) ? values : [];
+  const next = src.slice(0, 4).map((v) => Number(v) || 0);
+  while (next.length < 4) next.push(0);
+  return next;
+}
+
+function render() {
+  const current = normalize4(props.current);
+  const previous = normalize4(props.previous);
+
   renderEcharts({
     legend: {
       bottom: 0,
@@ -47,14 +62,14 @@ onMounted(() => {
               color: '#b6a2de',
             },
             name: '本月',
-            value: [90, 72, 48, 20],
+            value: current,
           },
           {
             itemStyle: {
               color: '#5ab1ef',
             },
             name: '上月',
-            value: [78, 60, 55, 26],
+            value: previous,
           },
         ],
         itemStyle: {
@@ -68,7 +83,19 @@ onMounted(() => {
     ],
     tooltip: {},
   });
+}
+
+onMounted(() => {
+  render();
 });
+
+watch(
+  () => [props.current, props.previous],
+  () => {
+    render();
+  },
+  { deep: true },
+);
 </script>
 
 <template>

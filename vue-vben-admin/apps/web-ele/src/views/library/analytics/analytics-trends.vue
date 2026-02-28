@@ -1,14 +1,32 @@
 <script lang="ts" setup>
 import type { EchartsUIType } from '@vben/plugins/echarts';
 
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 
 import { EchartsUI, useEcharts } from '@vben/plugins/echarts';
+
+const props = defineProps<{
+  borrows: number[];
+  labels: string[];
+  returns: number[];
+}>();
 
 const chartRef = ref<EchartsUIType>();
 const { renderEcharts } = useEcharts(chartRef);
 
-onMounted(() => {
+function getMax(values: number[]) {
+  const max = values.reduce((acc, cur) => (cur > acc ? cur : acc), 0);
+  if (!Number.isFinite(max) || max <= 0) return 10;
+  return Math.max(10, Math.ceil(max / 10) * 10);
+}
+
+function render() {
+  const labels = Array.isArray(props.labels) && props.labels.length > 0 ? props.labels : [];
+  const borrows = Array.isArray(props.borrows) ? props.borrows : [];
+  const returns = Array.isArray(props.returns) ? props.returns : [];
+
+  const max = getMax([...borrows, ...returns]);
+
   renderEcharts({
     grid: {
       bottom: 0,
@@ -20,11 +38,7 @@ onMounted(() => {
     series: [
       {
         areaStyle: {},
-        data: [
-          111, 2000, 6000, 16_000, 33_333, 55_555, 64_000, 33_333, 18_000,
-          36_000, 70_000, 42_444, 23_222, 13_000, 8000, 4000, 1200, 333, 222,
-          111,
-        ],
+        data: borrows,
         itemStyle: {
           color: '#5ab1ef',
         },
@@ -33,10 +47,7 @@ onMounted(() => {
       },
       {
         areaStyle: {},
-        data: [
-          33, 66, 88, 333, 3333, 6200, 20_000, 3000, 1200, 13_000, 22_000,
-          11_000, 2221, 1201, 390, 198, 60, 30, 22, 11,
-        ],
+        data: returns,
         itemStyle: {
           color: '#019680',
         },
@@ -53,20 +64,12 @@ onMounted(() => {
       },
       trigger: 'axis',
     },
-    // xAxis: {
-    //   axisTick: {
-    //     show: false,
-    //   },
-    //   boundaryGap: false,
-    //   data: Array.from({ length: 18 }).map((_item, index) => `${index + 6}:00`),
-    //   type: 'category',
-    // },
     xAxis: {
       axisTick: {
         show: false,
       },
       boundaryGap: false,
-      data: Array.from({ length: 18 }).map((_item, index) => `${index + 6}:00`),
+      data: labels,
       splitLine: {
         lineStyle: {
           type: 'solid',
@@ -81,7 +84,7 @@ onMounted(() => {
         axisTick: {
           show: false,
         },
-        max: 80_000,
+        max,
         splitArea: {
           show: true,
         },
@@ -90,7 +93,19 @@ onMounted(() => {
       },
     ],
   });
+}
+
+onMounted(() => {
+  render();
 });
+
+watch(
+  () => [props.labels, props.borrows, props.returns],
+  () => {
+    render();
+  },
+  { deep: true },
+);
 </script>
 
 <template>

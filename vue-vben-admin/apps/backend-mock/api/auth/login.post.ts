@@ -21,22 +21,22 @@ export default defineEventHandler(async (event) => {
     );
   }
 
-  const findUser = MOCK_USERS.find(
+  const user = MOCK_USERS.find(
     (item) => item.username === username && item.password === password,
   );
 
-  if (!findUser) {
+  if (!user) {
     clearRefreshTokenCookie(event);
     return forbiddenResponse(event, 'Username or password is incorrect.');
   }
 
-  const accessToken = generateAccessToken(findUser);
-  const refreshToken = generateRefreshToken(findUser);
+  const accessToken = generateAccessToken(user);
+  const refreshToken = generateRefreshToken(user);
 
   setRefreshTokenCookie(event, refreshToken);
 
   return useResponseSuccess({
-    ...findUser,
+    ...user,
     accessToken,
   });
 });
