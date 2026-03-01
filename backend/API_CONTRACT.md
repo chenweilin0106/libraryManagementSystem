@@ -155,6 +155,7 @@
 
 - `username`
 - `realName`
+- `phone`（国内手机号，前端用于“个人中心-安全设置”展示，建议后端始终返回）
 - `roles: string[]`
 - `homePath?: string`
 
@@ -308,6 +309,100 @@ type BookByIsbnResponseData = {
 };
 ```
 
+### 3.6 Excel 导入预览（批量入库）
+
+`POST /api/books/import/preview`
+
+用途：上传 Excel，由后端解析并返回“预览数据 + 行级校验结果”，前端用于展示确认。
+
+Body：
+
+```ts
+type BooksImportPreviewBody = {
+  // base64 dataUrl（FileReader.readAsDataURL）
+  dataUrl: string;
+  filename?: string;
+};
+```
+
+Excel 模板列（第一行表头，字段名大小写不敏感）：
+
+- `isbn`（必填）
+- `title`（新书必填；老书可空）
+- `author`（新书必填；老书可空）
+- `category`（新书必填；老书可空）
+- `cover_url`（可空，线上图片 URL）
+- `add_stock`（必填，>= 1，本次入库数量）
+
+响应（data 解包后）：
+
+```ts
+type BooksImportPreviewResponseData = {
+  import_id: string;
+  rows: Array<{
+    row_number: number; // Excel 行号（从 2 开始，表头为第 1 行）
+    isbn: string;
+    title: string;
+    author: string;
+    category: string;
+    cover_url: string;
+    add_stock: number;
+    exists: boolean;
+    existing_is_deleted: boolean;
+    is_valid: boolean;
+    errors: string[];
+  }>;
+  summary: {
+    total_rows: number;
+    valid_rows: number;
+    invalid_rows: number;
+    existing_rows: number;
+    new_rows: number;
+  };
+};
+```
+
+### 3.7 Excel 导入提交（批量入库）
+
+`POST /api/books/import/commit`
+
+Body：
+
+```ts
+type BooksImportCommitBody = {
+  import_id: string;
+  // 处理重复 ISBN 的策略（仅对“Excel 行命中老书”生效）
+  conflict_strategy: 'increment_stock' | 'skip' | 'overwrite';
+  // 命中老书且本次 add_stock > 0 时是否自动上架（默认 true）
+  auto_unshelf?: boolean;
+};
+```
+
+响应（data 解包后）：
+
+```ts
+type BooksImportCommitResponseData = {
+  summary: {
+    created: number;
+    incremented: number;
+    overwritten: number;
+    skipped: number;
+    failed: number;
+  };
+  items: Array<{
+    row_number: number;
+    isbn: string;
+    action:
+      | 'created'
+      | 'incremented'
+      | 'overwritten'
+      | 'skipped'
+      | 'failed';
+    error?: string;
+  }>;
+};
+```
+
 ---
 
 ## 4. 借阅管理（Borrows）
@@ -444,6 +539,7 @@ type UsersListResponseData = {
   items: Array<{
     _id: string;
     username: string;
+    phone: string;        // 国内手机号（11 位），必填且唯一
     role: 'admin' | 'user';
     status: 0 | 1;
     credit_score: number;
@@ -464,6 +560,7 @@ Body：
 ```ts
 type CreateUserBody = {
   username: string;
+  phone: string;          // 国内手机号（11 位），必填且唯一
   role: 'admin' | 'user';
   status: 0 | 1;
   credit_score: number; // >= 0
@@ -474,8 +571,10 @@ type CreateUserBody = {
 建议约束：
 
 - `username` 不能为空（400）
+- `phone` 不能为空且符合国内手机号格式（400）
 - `credit_score` 必须为非负数（400）
 - `username` 唯一（409）
+- `phone` 唯一（409）
 - 禁止创建内置账号同名：`admin`、`vben`（400/409 均可，mock 为 400）
 
 ### 5.3 编辑用户
@@ -524,6 +623,88 @@ Body 同新增。
 
 - 禁止删除
 - 禁止重置密码
+
+---
+
+### 5.7 批量导入用户（Excel）
+
+> 说明：用于“用户管理-导入 Excel”批量新增用户。接口采用 `preview -> commit` 两步，避免直接入库造成不可控影响。
+
+#### 5.7.1 预览
+
+`POST /api/users/import/preview`
+
+Body（JSON）：
+
+```ts
+type UsersImportPreviewBody = {
+  // base64 dataUrl：data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,xxxx
+  dataUrl: string;
+  filename?: string;
+};
+```
+
+Excel 表头（第一行，大小写不敏感）：
+
+- 必填：`username`, `phone`
+- 可选：`role`（`admin|user`，默认 `user`）、`status`（`0|1`，默认 `1`）、`credit_score`（>=0，默认 `100`）、`avatar`（URL，可为空）
+
+返回（data 解包后）：
+
+```ts
+type UsersImportPreviewResponseData = {
+  import_id: string;
+  rows: Array<{
+    row_number: number;
+    username: string;
+    phone: string;
+    role: 'admin' | 'user';
+    status: 0 | 1;
+    credit_score: number;
+    avatar: string;
+    exists: boolean;   // phone 是否已存在
+    is_valid: boolean; // 是否可导入
+    errors: string[];
+  }>;
+  summary: {
+    total_rows: number;
+    valid_rows: number;
+    invalid_rows: number;
+    existing_rows: number;
+    new_rows: number;
+  };
+};
+```
+
+#### 5.7.2 提交入库
+
+`POST /api/users/import/commit`
+
+Body（JSON）：
+
+```ts
+type UsersImportCommitBody = {
+  import_id: string;
+};
+```
+
+返回（data 解包后）：
+
+```ts
+type UsersImportCommitResponseData = {
+  summary: {
+    created: number;
+    failed: number;
+  };
+  items: Array<{
+    row_number: number;
+    username: string;
+    phone: string;
+    action: 'created' | 'failed';
+    error?: string;
+  }>;
+};
+```
 - 禁止冻结/解冻（status 不允许变更）
 - 禁止改用户名
 - 禁止改角色

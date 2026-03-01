@@ -4,7 +4,7 @@ import type { VxeGridProps } from '#/adapter/vxe-table';
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
-import { Page, useVbenDrawer } from '@vben/common-ui';
+import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
 import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
@@ -15,6 +15,9 @@ import {
   ElImage,
   ElMessage,
   ElMessageBox,
+  ElRadioButton,
+  ElRadioGroup,
+  ElSwitch,
   ElTabPane,
   ElTabs,
   ElTag,
@@ -25,8 +28,10 @@ import { useVbenForm } from '#/adapter/form';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import type { BooksApi } from '#/api';
 import {
+  commitBooksImportApi,
   createBookApi,
   listBooksApi,
+  previewBooksImportApi,
   setBookShelfApi,
   uploadApi,
   updateBookApi,
@@ -36,6 +41,8 @@ defineOptions({ name: 'Books' });
 
 type BookStatus = BooksApi.BookStatus;
 type Book = BooksApi.Book;
+type ImportConflictStrategy = BooksApi.ImportConflictStrategy;
+type ImportPreviewRow = BooksApi.ImportPreviewRow;
 
 const CATEGORY_OPTIONS = [
   { label: '计算机', value: '计算机' },
@@ -58,6 +65,11 @@ const editingOriginalCoverUrl = ref<string | null>(null);
 const uploadFileList = ref<any[]>([]);
 const coverPreviewUrl = ref<string>('');
 const coverPreviewOpen = ref(false);
+const importPreviewLoading = ref(false);
+const importCommitLoading = ref(false);
+const importPreviewData = ref<BooksApi.ImportPreviewResponseData | null>(null);
+const importConflictStrategy = ref<ImportConflictStrategy>('increment_stock');
+const importAutoUnshelf = ref(true);
 // vben-form 托管 Upload 的 fileList（modelPropNameMap: Upload -> fileList）
 // 需要通过 formApi 更新 cover_files 才能让 UI 生效
 
@@ -66,6 +78,23 @@ const rawObjectUrlMap = new WeakMap<File, string>();
 let activeCoverObjectUrls = new Set<string>();
 let retainedCoverObjectUrls = new Set<string>();
 const gridPager = ref({ currentPage: 1, pageSize: 20 });
+
+const [ImportPreviewModal, importPreviewModalApi] = useVbenModal({
+  cancelText: '取消',
+  confirmText: '确认导入',
+  fullscreen: true,
+  fullscreenButton: false,
+  onCancel() {
+    importPreviewModalApi.close();
+  },
+  onClosed() {
+    resetImportPreview();
+  },
+  onConfirm() {
+    onImportCommit();
+  },
+  title: '导入预览',
+});
 
 function getOrCreateManagedObjectUrl(raw: File) {
   const existing = rawObjectUrlMap.get(raw);
@@ -290,6 +319,20 @@ function getTableCoverSrc(row: Book) {
   return getCoverSrc(row.cover_url);
 }
 
+const importCoverLoadFailedIsbns = ref<Set<string>>(new Set());
+
+function markImportCoverLoadFailed(isbn: string) {
+  const normalized = String(isbn ?? '').trim();
+  if (!normalized) return;
+  if (importCoverLoadFailedIsbns.value.has(normalized)) return;
+  importCoverLoadFailedIsbns.value = new Set([...importCoverLoadFailedIsbns.value, normalized]);
+}
+
+function getImportCoverSrc(row: ImportPreviewRow) {
+  if (importCoverLoadFailedIsbns.value.has(row.isbn)) return COVER_PLACEHOLDER_SRC;
+  return getCoverSrc(row.cover_url);
+}
+
 function resolveFileUrl(file?: UploadFile) {
   if (!file) return '';
   const url = (file.response as any)?.url || (file as any).url;
@@ -306,6 +349,70 @@ function fileToDataUrl(file: File) {
     reader.onload = () => resolve(String(reader.result ?? ''));
     reader.readAsDataURL(file);
   });
+}
+
+function getImportRowAction(row: ImportPreviewRow) {
+  if (!row.is_valid) return 'failed';
+  if (!row.exists) return 'created';
+  if (importConflictStrategy.value === 'skip') return 'skipped';
+  if (importConflictStrategy.value === 'overwrite') return 'overwritten';
+  return 'incremented';
+}
+
+function getImportRowActionLabel(row: ImportPreviewRow) {
+  const action = getImportRowAction(row);
+  if (action === 'created') return '新增';
+  if (action === 'incremented') return '增加库存';
+  if (action === 'overwritten') return '覆盖并入库';
+  if (action === 'skipped') return '跳过';
+  return '无效';
+}
+
+function resetImportPreview() {
+  importPreviewLoading.value = false;
+  importCommitLoading.value = false;
+  importPreviewData.value = null;
+  importConflictStrategy.value = 'increment_stock';
+  importAutoUnshelf.value = true;
+  importCoverLoadFailedIsbns.value = new Set();
+  try {
+    importGridApi.setGridOptions({ data: [] });
+  } catch {
+    // ignore
+  }
+}
+
+async function onImportCommit() {
+  if (importCommitLoading.value) return;
+  const importId = importPreviewData.value?.import_id;
+  if (!importId) return;
+
+  importCommitLoading.value = true;
+  importPreviewModalApi.setState({ confirmDisabled: true, confirmLoading: true });
+  try {
+    const result = await commitBooksImportApi({
+      auto_unshelf: importAutoUnshelf.value,
+      conflict_strategy: importConflictStrategy.value,
+      import_id: importId,
+    });
+    const summary = result?.summary ?? ({} as any);
+    const msg = `导入完成：新增 ${summary.created ?? 0}，累加 ${summary.incremented ?? 0}，覆盖 ${summary.overwritten ?? 0}，跳过 ${summary.skipped ?? 0}，失败 ${summary.failed ?? 0}`;
+    if ((summary.failed ?? 0) > 0) {
+      ElMessage.warning(msg);
+    } else {
+      ElMessage.success(msg);
+    }
+    importPreviewModalApi.close();
+    refresh();
+  } catch {
+    return;
+  } finally {
+    importCommitLoading.value = false;
+    importPreviewModalApi.setState({
+      confirmLoading: false,
+      confirmDisabled: (importPreviewData.value?.summary.valid_rows ?? 0) === 0,
+    });
+  }
 }
 
 async function resolveCoverUrlForSubmit(coverFile?: UploadFile) {
@@ -460,6 +567,58 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions,
 });
 
+const importGridOptions: VxeGridProps<ImportPreviewRow> = {
+  columns: [
+    { field: 'row_number', title: '行号', width: 80 },
+    { field: 'isbn', title: 'ISBN', width: 170 },
+    { field: 'title', title: '图书名', minWidth: 180 },
+    { field: 'author', title: '作者', width: 140 },
+    { field: 'category', title: '类别', width: 110 },
+    {
+      field: 'cover_url',
+      slots: { default: 'import-cover' },
+      title: '封面',
+      width: 140,
+    },
+    { field: 'add_stock', title: '入库数', width: 90 },
+    {
+      field: 'exists',
+      slots: { default: 'import-exists' },
+      title: '是否老书',
+      width: 90,
+    },
+    {
+      field: 'action',
+      slots: { default: 'import-action' },
+      title: '处理动作',
+      width: 110,
+    },
+    {
+      field: 'errors',
+      slots: { default: 'import-errors' },
+      title: '校验结果',
+      minWidth: 260,
+    },
+  ],
+  data: [],
+  height: '100%',
+  keepSource: true,
+  cellConfig: {
+    height: 160,
+  },
+  toolbarConfig: {
+    enabled: false,
+  },
+  pagerConfig: {
+    enabled: false,
+  },
+  showOverflow: true,
+};
+
+const [ImportGrid, importGridApi] = useVbenVxeGrid({
+  gridOptions: importGridOptions,
+});
+
 const [Drawer, drawerApi] = useVbenDrawer({
   destroyOnClose: true,
   onCancel() {
@@ -586,13 +745,41 @@ function onUploadChange(_file: any, fileList: any[]) {
 
 async function onDrawerConfirm() {
   if (drawerMode.value === 'create' && drawerActiveTab.value === 'import') {
+    if (importPreviewLoading.value) return;
     const file = uploadFileList.value[0];
     if (!file) {
       ElMessage.warning('请先选择 Excel 文件');
       return;
     }
-    ElMessage.success(`已选择文件：${file.name}（静态页面：未接入上传接口）`);
-    drawerApi.close();
+
+    const raw = (file as any)?.raw as File | undefined;
+    if (!raw) {
+      ElMessage.error('文件读取失败，请重新选择');
+      return;
+    }
+
+    importPreviewLoading.value = true;
+    try {
+      const dataUrl = await fileToDataUrl(raw);
+      const result = await previewBooksImportApi({ dataUrl, filename: raw.name });
+      importPreviewData.value = result;
+      importPreviewModalApi.setState({
+        confirmDisabled: (result?.summary.valid_rows ?? 0) === 0,
+        confirmLoading: false,
+      });
+      importPreviewModalApi.open();
+      await nextTick();
+      importGridApi.setGridOptions({
+        data: result?.rows ?? [],
+      });
+      await nextTick();
+      importGridApi.grid?.recalculate?.();
+      drawerApi.close();
+    } catch {
+      return;
+    } finally {
+      importPreviewLoading.value = false;
+    }
     return;
   }
 
@@ -751,6 +938,73 @@ onBeforeUnmount(() => {
         />
       </div>
     </ElDialog>
+
+    <ImportPreviewModal>
+      <div class="flex h-full flex-col">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+          <div class="text-muted-foreground text-sm">
+            共 {{ importPreviewData?.summary.total_rows ?? 0 }} 行，合法
+            {{ importPreviewData?.summary.valid_rows ?? 0 }} 行；新书
+            {{ importPreviewData?.summary.new_rows ?? 0 }} 行，老书
+            {{ importPreviewData?.summary.existing_rows ?? 0 }} 行。
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <ElRadioGroup v-model="importConflictStrategy" size="small">
+              <ElRadioButton label="increment_stock">老书累加库存</ElRadioButton>
+              <ElRadioButton label="skip">老书跳过</ElRadioButton>
+              <ElRadioButton label="overwrite">老书覆盖字段</ElRadioButton>
+            </ElRadioGroup>
+            <ElSwitch
+              v-model="importAutoUnshelf"
+              active-text="自动上架"
+              inactive-text="不自动上架"
+              inline-prompt
+            />
+          </div>
+        </div>
+
+        <div class="min-h-0 flex-1 px-3 pb-3">
+          <ImportGrid>
+            <template #import-cover="{ row }">
+              <div class="flex items-center justify-center py-2">
+                <ElImage
+                  :src="getImportCoverSrc(row)"
+                  :preview-src-list="[getImportCoverSrc(row)]"
+                  :preview-teleported="true"
+                  class="cursor-pointer"
+                  fit="cover"
+                  style="width: 96px; height: 128px"
+                  @error="markImportCoverLoadFailed(row.isbn)"
+                />
+              </div>
+            </template>
+
+            <template #import-exists="{ row }">
+              <ElTag v-if="row.exists" type="warning">老书</ElTag>
+              <ElTag v-else type="success">新书</ElTag>
+            </template>
+
+            <template #import-action="{ row }">
+              <ElTag v-if="!row.is_valid" type="danger">无效</ElTag>
+              <ElTag v-else-if="getImportRowAction(row) === 'created'" type="success">
+                {{ getImportRowActionLabel(row) }}
+              </ElTag>
+              <ElTag v-else-if="getImportRowAction(row) === 'skipped'" type="info">
+                {{ getImportRowActionLabel(row) }}
+              </ElTag>
+              <ElTag v-else type="warning">{{ getImportRowActionLabel(row) }}</ElTag>
+            </template>
+
+            <template #import-errors="{ row }">
+              <span v-if="row.errors?.length" class="text-red-500">
+                {{ row.errors.join('；') }}
+              </span>
+              <ElTag v-else type="success">通过</ElTag>
+            </template>
+          </ImportGrid>
+        </div>
+      </div>
+    </ImportPreviewModal>
   </Page>
 
 </template>

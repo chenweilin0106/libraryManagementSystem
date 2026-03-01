@@ -15,6 +15,11 @@ interface UserInfo extends BasicUserInfo {
    * accessToken
    */
   token: string;
+
+  /**
+   * 手机号（国内 11 位）
+   */
+  phone?: string;
 }
 
 export type { UserInfo };

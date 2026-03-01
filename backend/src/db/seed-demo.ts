@@ -204,6 +204,7 @@ export async function seedDemoDataIfEmpty() {
         _id: new ObjectId(),
         username,
         username_lower,
+        phone: `18${String(100000000 + i)}`,
         role,
         status,
         credit_score,

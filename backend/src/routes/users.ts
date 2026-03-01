@@ -10,6 +10,7 @@ import { ok } from '../utils/response.js';
 
 const DEFAULT_PASSWORD = '123456';
 const PROTECTED_USERNAMES = new Set(['admin', 'vben']);
+const CN_PHONE_RE = /^1[3-9]\d{9}$/;
 
 function normalizeText(value: unknown) {
   return String(value ?? '').trim();
@@ -18,6 +19,17 @@ function normalizeText(value: unknown) {
 function normalizeUsername(username: string) {
   const trimmed = username.trim();
   return { raw: trimmed, lower: trimmed.toLowerCase() };
+}
+
+function normalizePhone(value: unknown) {
+  return normalizeText(value).replaceAll(/\s+/g, '');
+}
+
+function parseCnPhone(value: unknown) {
+  const phone = normalizePhone(value);
+  if (!phone) return { phone: '', error: '手机号不能为空' };
+  if (!CN_PHONE_RE.test(phone)) return { phone, error: '手机号格式不合法' };
+  return { phone, error: '' };
 }
 
 function isProtectedUsername(username: string) {
@@ -53,6 +65,7 @@ function userToApi(doc: UserDoc) {
     avatar: doc.avatar || '',
     created_at: doc.created_at.toISOString(),
     credit_score: doc.credit_score,
+    phone: String((doc as any).phone ?? '').trim(),
     password: '',
     role: doc.role,
     status: doc.status,
@@ -98,6 +111,7 @@ export function registerUsersRoutes(router: Router) {
     const status = parseStatus(body.status);
     const creditScore = toNonNegativeNumber(body.credit_score);
     const avatar = normalizeText(body.avatar);
+    const { phone, error: phoneError } = parseCnPhone(body.phone);
 
     if (!username) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'username 不能为空' });
@@ -114,6 +128,9 @@ export function registerUsersRoutes(router: Router) {
     if (creditScore === null) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'credit_score 必须为非负数' });
     }
+    if (phoneError) {
+      throwHttpError({ status: 400, message: 'BadRequest', error: phoneError });
+    }
 
     const password = await hashPassword(DEFAULT_PASSWORD);
     const now = new Date();
@@ -121,6 +138,7 @@ export function registerUsersRoutes(router: Router) {
       const inserted = await usersCol().insertOne({
         username,
         username_lower: usernameLower,
+        phone,
         role,
         status,
         credit_score: creditScore,
@@ -133,6 +151,9 @@ export function registerUsersRoutes(router: Router) {
       ok(ctx, userToApi(created as UserDoc));
     } catch (error: any) {
       if (error?.code === 11000) {
+        if (error?.keyPattern?.phone) {
+          throwHttpError({ status: 409, message: 'Conflict', error: '手机号已存在' });
+        }
         throwHttpError({ status: 409, message: 'Conflict', error: 'username 已存在' });
       }
       throw error;
@@ -160,6 +181,7 @@ export function registerUsersRoutes(router: Router) {
     const status = parseStatus(body.status);
     const creditScore = toNonNegativeNumber(body.credit_score);
     const avatar = normalizeText(body.avatar);
+    const { phone, error: phoneError } = parseCnPhone(body.phone);
 
     if (!username) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'username 不能为空' });
@@ -175,6 +197,9 @@ export function registerUsersRoutes(router: Router) {
     }
     if (creditScore === null) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'credit_score 必须为非负数' });
+    }
+    if (phoneError) {
+      throwHttpError({ status: 400, message: 'BadRequest', error: phoneError });
     }
 
     const protectedUser = isProtectedUsername(existing.username_lower);
@@ -197,19 +222,30 @@ export function registerUsersRoutes(router: Router) {
       }
     }
 
-    await usersCol().updateOne(
-      { _id: existing._id },
-      {
-        $set: {
-          username,
-          username_lower: usernameLower,
-          role,
-          status,
-          credit_score: creditScore,
-          avatar: avatar || '',
+    try {
+      await usersCol().updateOne(
+        { _id: existing._id },
+        {
+          $set: {
+            username,
+            username_lower: usernameLower,
+            phone,
+            role,
+            status,
+            credit_score: creditScore,
+            avatar: avatar || '',
+          },
         },
-      },
-    );
+      );
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        if (error?.keyPattern?.phone) {
+          throwHttpError({ status: 409, message: 'Conflict', error: '手机号已存在' });
+        }
+        throwHttpError({ status: 409, message: 'Conflict', error: 'username 已存在' });
+      }
+      throw error;
+    }
 
     const updated = await usersCol().findOne({ _id: existing._id });
     ok(ctx, userToApi(updated as UserDoc));
@@ -261,4 +297,3 @@ export function registerUsersRoutes(router: Router) {
     ok(ctx, null);
   });
 }
-

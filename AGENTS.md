@@ -21,12 +21,19 @@
 - Node：建议 `>=20.19.0`（Vite 构建要求）
 - pnpm：建议 `>=10`
 
+## 本地运行文档/脚本
+- 运行指南：`RUNNING.md`
+- 一键启动（Windows Terminal 多 Tab：数据库/后端/前端/codex）：`start-dev.ps1`
+
 ### 后端（backend）
 - 运行前提：本地 MongoDB 需要可连接（默认 `mongodb://127.0.0.1:27017`，数据库名 `library`；可用 `backend/.env` 覆盖）
 - 安装：`pnpm -C backend install`
 - 开发：`pnpm -C backend dev`
 - 备用（不推荐，仅排查用）：`pnpm -C backend dev:tsx`
 - 构建：`pnpm -C backend build`
+
+### 数据脚本（backend）
+- 回填用户手机号（必填+唯一）：`pnpm -C backend backfill:phones`
 
 ### 前端（vue-vben-admin）
 - 安装：`pnpm -C vue-vben-admin install`

@@ -9,6 +9,7 @@ export namespace UsersApi {
     avatar?: string;
     created_at: string;
     credit_score: number;
+    phone: string;
     password: string;
     role: UserRole;
     status: UserStatus;
@@ -33,9 +34,60 @@ export namespace UsersApi {
   export interface UpsertBody {
     avatar?: string;
     credit_score: number;
+    phone: string;
     role: UserRole;
     status: UserStatus;
     username: string;
+  }
+
+  export interface ImportPreviewBody {
+    dataUrl: string;
+    filename?: string;
+  }
+
+  export interface ImportPreviewRow {
+    row_number: number;
+    username: string;
+    phone: string;
+    role: UserRole;
+    status: UserStatus;
+    credit_score: number;
+    avatar: string;
+    exists: boolean;
+    is_valid: boolean;
+    errors: string[];
+  }
+
+  export interface ImportPreviewResponseData {
+    import_id: string;
+    rows: ImportPreviewRow[];
+    summary: {
+      total_rows: number;
+      valid_rows: number;
+      invalid_rows: number;
+      existing_rows: number;
+      new_rows: number;
+    };
+  }
+
+  export interface ImportCommitBody {
+    import_id: string;
+  }
+
+  export interface ImportCommitItem {
+    row_number: number;
+    username: string;
+    phone: string;
+    action: 'created' | 'failed';
+    error?: string;
+  }
+
+  export interface ImportCommitResponseData {
+    summary: {
+      created: number;
+      failed: number;
+    };
+    items: ImportCommitItem[];
   }
 }
 
@@ -64,4 +116,18 @@ export async function resetUserPasswordApi(id: string) {
 
 export async function deleteUserApi(id: string) {
   return requestClient.delete<null>(`/users/${encodeURIComponent(id)}`);
+}
+
+export async function previewUsersImportApi(data: UsersApi.ImportPreviewBody) {
+  return requestClient.post<UsersApi.ImportPreviewResponseData>(
+    '/users/import/preview',
+    data,
+  );
+}
+
+export async function commitUsersImportApi(data: UsersApi.ImportCommitBody) {
+  return requestClient.post<UsersApi.ImportCommitResponseData>(
+    '/users/import/commit',
+    data,
+  );
 }

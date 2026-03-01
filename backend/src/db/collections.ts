@@ -9,6 +9,7 @@ export type UserDoc = {
   _id: ObjectId;
   username: string;
   username_lower: string;
+  phone: string;
   role: UserRole;
   status: UserStatus;
   credit_score: number;
@@ -82,4 +83,3 @@ export function borrowsCol(): Collection<BorrowDoc> {
 export function sessionsCol(): Collection<SessionDoc> {
   return getMongoDb().collection<SessionDoc>('sessions');
 }
-

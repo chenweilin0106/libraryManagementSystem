@@ -4,7 +4,7 @@ import type { VxeGridProps } from '#/adapter/vxe-table';
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
-import { Page, useVbenDrawer } from '@vben/common-ui';
+import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
 import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
@@ -26,9 +26,11 @@ import { useVbenForm } from '#/adapter/form';
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import type { UsersApi } from '#/api';
 import {
+  commitUsersImportApi,
   createUserApi,
   deleteUserApi,
   listUsersApi,
+  previewUsersImportApi,
   resetUserPasswordApi,
   updateUserApi,
 } from '#/api';
@@ -38,6 +40,7 @@ defineOptions({ name: 'Users' });
 type UserRole = UsersApi.UserRole;
 type UserStatus = UsersApi.UserStatus;
 type User = UsersApi.User;
+type ImportPreviewRow = UsersApi.ImportPreviewRow;
 
 const DEFAULT_PASSWORD = '123456';
 const AVATAR_PLACEHOLDER_SRC = '/avatars/avatar-placeholder.svg';
@@ -60,12 +63,32 @@ const avatarPreviewOpen = ref(false);
 const avatarPreviewUrl = ref<string>('');
 const uploadExcelFileList = ref<any[]>([]);
 const avatarLoadFailedIds = ref<Set<string>>(new Set());
+const importPreviewLoading = ref(false);
+const importCommitLoading = ref(false);
+const importPreviewData = ref<UsersApi.ImportPreviewResponseData | null>(null);
 
 // vben-form 托管 Upload 的 fileList，这里管理 object url，避免替换/关闭抽屉后内存泄漏
 const managedObjectUrls = new Set<string>();
 const rawObjectUrlMap = new WeakMap<File, string>();
 let activeAvatarObjectUrls = new Set<string>();
 let retainedAvatarObjectUrls = new Set<string>();
+
+const [ImportPreviewModal, importPreviewModalApi] = useVbenModal({
+  cancelText: '取消',
+  confirmText: '确认导入',
+  fullscreen: true,
+  fullscreenButton: false,
+  onCancel() {
+    importPreviewModalApi.close();
+  },
+  onClosed() {
+    resetImportPreview();
+  },
+  onConfirm() {
+    onImportCommit();
+  },
+  title: '导入预览',
+});
 
 function getOrCreateManagedObjectUrl(raw: File) {
   const existing = rawObjectUrlMap.get(raw);
@@ -130,6 +153,15 @@ function resolveFileUrl(file?: UploadFile | UploadUserFile) {
   const raw = (file as any).raw as File | undefined;
   if (raw) return getOrCreateManagedObjectUrl(raw);
   return '';
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read file failed'));
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.readAsDataURL(file);
+  });
 }
 
 function isProtectedUser(user: Pick<User, 'username'>) {
@@ -312,6 +344,7 @@ const gridOptions: VxeGridProps<User> = {
       width: 80,
     },
     { field: 'username', title: '用户名', minWidth: 140 },
+    { field: 'phone', title: '手机号', width: 140 },
     {
       field: 'role',
       slots: { default: 'role' },
@@ -388,6 +421,55 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions,
 });
 
+const importGridOptions: VxeGridProps<ImportPreviewRow> = {
+  columns: [
+    { field: 'row_number', title: '行号', width: 80 },
+    { field: 'username', title: '用户名', minWidth: 140 },
+    { field: 'phone', title: '手机号', width: 140 },
+    { field: 'role', title: '角色', width: 100 },
+    { field: 'status', title: '状态', width: 90 },
+    { field: 'credit_score', title: '信用积分', width: 110 },
+    {
+      field: 'avatar',
+      slots: { default: 'import-avatar' },
+      title: '头像',
+      width: 90,
+    },
+    {
+      field: 'exists',
+      slots: { default: 'import-exists' },
+      title: '是否已存在',
+      width: 110,
+    },
+    {
+      field: 'action',
+      slots: { default: 'import-action' },
+      title: '处理动作',
+      width: 110,
+    },
+    {
+      field: 'errors',
+      slots: { default: 'import-errors' },
+      title: '校验结果',
+      minWidth: 260,
+    },
+  ],
+  data: [],
+  height: '100%',
+  keepSource: true,
+  toolbarConfig: {
+    enabled: false,
+  },
+  pagerConfig: {
+    enabled: false,
+  },
+  showOverflow: true,
+};
+
+const [ImportGrid, importGridApi] = useVbenVxeGrid({
+  gridOptions: importGridOptions,
+});
+
 function refresh() {
   gridApi.query();
 }
@@ -415,6 +497,15 @@ const userFormSchema: VbenFormSchema[] = [
     fieldName: 'username',
     label: '用户名',
     rules: 'required',
+  },
+  {
+    component: 'Input',
+    componentProps: {
+      placeholder: '请输入手机号',
+    },
+    fieldName: 'phone',
+    label: '手机号',
+    rules: 'cnPhone',
   },
   {
     component: 'Select',
@@ -502,6 +593,7 @@ function onCreate() {
       {
         avatar_files: [],
         credit_score: 100,
+        phone: '',
         role: 'user',
         username: '',
       },
@@ -532,6 +624,7 @@ function onEdit(row: User) {
           } as any,
         ],
         credit_score: row.credit_score ?? 100,
+        phone: row.phone ?? '',
         role: row.role,
         username: row.username,
       },
@@ -543,20 +636,46 @@ function onEdit(row: User) {
 
 async function onDrawerConfirm() {
   if (drawerMode.value === 'create' && drawerActiveTab.value === 'import') {
+    if (importPreviewLoading.value) return;
     const file = uploadExcelFileList.value[0];
     if (!file) {
       ElMessage.warning('请先选择 Excel 文件');
       return;
     }
-    ElMessage.success(
-      `已选择文件：${file.name}（静态页面：仅占位上传，暂未解析导入）`,
-    );
-    drawerApi.close();
+
+    const raw = (file as any)?.raw as File | undefined;
+    if (!raw) {
+      ElMessage.error('文件读取失败，请重新选择');
+      return;
+    }
+
+    importPreviewLoading.value = true;
+    try {
+      const dataUrl = await fileToDataUrl(raw);
+      const result = await previewUsersImportApi({ dataUrl, filename: raw.name });
+      importPreviewData.value = result;
+      importPreviewModalApi.setState({
+        confirmDisabled: (result?.summary.valid_rows ?? 0) === 0,
+        confirmLoading: false,
+      });
+      importPreviewModalApi.open();
+      await nextTick();
+      importGridApi.setGridOptions({ data: result?.rows ?? [] });
+      await nextTick();
+      importGridApi.grid?.recalculate?.();
+      drawerApi.close();
+    } catch {
+      return;
+    } finally {
+      importPreviewLoading.value = false;
+    }
     return;
   }
 
   const values = (await userFormApi.validateAndSubmitForm()) as
-    | (Pick<User, 'credit_score' | 'role' | 'username'> & { avatar_files?: UploadFile[] })
+    | (Pick<User, 'credit_score' | 'role' | 'username' | 'phone'> & {
+        avatar_files?: UploadFile[];
+      })
     | undefined;
 
   if (!values) return;
@@ -566,6 +685,7 @@ async function onDrawerConfirm() {
 
   const role = (values.role ?? 'user') as UserRole;
   const creditScore = Number(values.credit_score ?? 100);
+  const phone = String((values as any).phone ?? '').trim();
   const avatarFiles = (values as any).avatar_files as UploadFile[] | undefined;
   const avatarFile = avatarFiles?.[0];
   const avatarUrl = resolveFileUrl(avatarFile) || AVATAR_PLACEHOLDER_SRC;
@@ -578,6 +698,7 @@ async function onDrawerConfirm() {
   const payload: UsersApi.UpsertBody = {
     avatar: avatarUrl,
     credit_score: creditScore,
+    phone,
     role,
     status: editingStatus.value,
     username,
@@ -660,6 +781,46 @@ async function onDelete(row: User) {
   }
 }
 
+function resetImportPreview() {
+  importPreviewLoading.value = false;
+  importCommitLoading.value = false;
+  importPreviewData.value = null;
+  try {
+    importGridApi.setGridOptions({ data: [] });
+  } catch {
+    // ignore
+  }
+}
+
+async function onImportCommit() {
+  if (importCommitLoading.value) return;
+  const importId = importPreviewData.value?.import_id;
+  if (!importId) return;
+
+  importCommitLoading.value = true;
+  importPreviewModalApi.setState({ confirmDisabled: true, confirmLoading: true });
+  try {
+    const result = await commitUsersImportApi({ import_id: importId });
+    const summary = result?.summary ?? ({} as any);
+    const msg = `导入完成：新增 ${summary.created ?? 0}，失败 ${summary.failed ?? 0}`;
+    if ((summary.failed ?? 0) > 0) {
+      ElMessage.warning(msg);
+    } else {
+      ElMessage.success(msg);
+    }
+    importPreviewModalApi.close();
+    refresh();
+  } catch {
+    return;
+  } finally {
+    importCommitLoading.value = false;
+    importPreviewModalApi.setState({
+      confirmLoading: false,
+      confirmDisabled: (importPreviewData.value?.summary.valid_rows ?? 0) === 0,
+    });
+  }
+}
+
 onBeforeUnmount(() => {
   for (const url of managedObjectUrls) {
     URL.revokeObjectURL(url);
@@ -719,7 +880,7 @@ onBeforeUnmount(() => {
         <ElTabPane v-if="drawerMode === 'create'" label="导入 Excel" name="import">
           <div class="space-y-3 px-4 pb-4 pt-2">
             <div class="text-muted-foreground text-sm">
-              仅上传文件，由后端解析入库（当前为静态页面占位）。
+              选择文件后点击右下角“上传”，系统会先进行导入预览，确认后再写入数据库。
             </div>
             <ElUpload
               :auto-upload="false"
@@ -737,6 +898,53 @@ onBeforeUnmount(() => {
         </ElTabPane>
       </ElTabs>
     </Drawer>
+
+    <ImportPreviewModal>
+      <div class="flex h-full flex-col">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+          <div class="text-muted-foreground text-sm">
+            共 {{ importPreviewData?.summary.total_rows ?? 0 }} 行，合法
+            {{ importPreviewData?.summary.valid_rows ?? 0 }} 行；新增
+            {{ importPreviewData?.summary.new_rows ?? 0 }} 行；已存在
+            {{ importPreviewData?.summary.existing_rows ?? 0 }} 行。
+          </div>
+        </div>
+
+        <div class="min-h-0 flex-1 px-3 pb-3">
+          <ImportGrid>
+            <template #import-avatar="{ row }">
+              <div class="flex items-center justify-center">
+                <ElImage
+                  :src="row.avatar || AVATAR_PLACEHOLDER_SRC"
+                  :preview-src-list="[row.avatar || AVATAR_PLACEHOLDER_SRC]"
+                  :preview-teleported="true"
+                  class="cursor-pointer"
+                  fit="cover"
+                  style="height: 32px; width: 32px; border-radius: 9999px"
+                />
+              </div>
+            </template>
+
+            <template #import-exists="{ row }">
+              <ElTag v-if="row.exists" type="warning">已存在</ElTag>
+              <ElTag v-else type="success">新用户</ElTag>
+            </template>
+
+            <template #import-action="{ row }">
+              <ElTag v-if="!row.is_valid" type="danger">无效</ElTag>
+              <ElTag v-else type="success">新增</ElTag>
+            </template>
+
+            <template #import-errors="{ row }">
+              <span v-if="row.errors?.length" class="text-red-500">
+                {{ row.errors.join('；') }}
+              </span>
+              <ElTag v-else type="success">通过</ElTag>
+            </template>
+          </ImportGrid>
+        </div>
+      </div>
+    </ImportPreviewModal>
 
     <Grid table-title="用户管理">
       <template #toolbar-tools>

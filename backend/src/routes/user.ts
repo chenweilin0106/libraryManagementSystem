@@ -19,6 +19,7 @@ export function registerUserRoutes(router: Router) {
       avatar: user.avatar || '',
       desc: user.role === 'admin' ? '管理员' : '读者',
       homePath: '/analytics',
+      phone: String((user as any).phone ?? '').trim(),
       realName: user.username,
       roles: [user.role === 'admin' ? 'super' : 'user'],
       token: auth.accessToken || '',
