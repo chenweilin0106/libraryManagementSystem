@@ -10,6 +10,8 @@ export type UserDoc = {
   username: string;
   username_lower: string;
   phone: string;
+  real_name?: string;
+  introduction?: string;
   role: UserRole;
   status: UserStatus;
   credit_score: number;
@@ -24,6 +26,7 @@ export type BookDoc = {
   isbn: string;
   title: string;
   author: string;
+  introduction?: string;
   category: string;
   cover_url: string;
   total_stock: number;

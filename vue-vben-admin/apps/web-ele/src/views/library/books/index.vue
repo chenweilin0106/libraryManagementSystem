@@ -190,6 +190,18 @@ const bookFormSchema: VbenFormSchema[] = [
     rules: 'required',
   },
   {
+    component: 'Input',
+    componentProps: {
+      autosize: { maxRows: 6, minRows: 3 },
+      maxlength: 300,
+      placeholder: '请输入简介（最多 300 字）',
+      showWordLimit: true,
+      type: 'textarea',
+    },
+    fieldName: 'introduction',
+    label: '简介',
+  },
+  {
     component: 'Select',
     componentProps: {
       clearable: true,
@@ -664,6 +676,7 @@ function onCreate() {
         category: undefined,
         cover_files: [],
         current_stock: 0,
+        introduction: '',
         isbn: '',
         title: '',
         total_stock: 0,
@@ -695,6 +708,7 @@ function onEdit(row: Book) {
           } as any,
         ],
         current_stock: row.current_stock,
+        introduction: row.introduction ?? '',
         isbn: row.isbn,
         title: row.title,
         total_stock: row.total_stock,
@@ -786,7 +800,13 @@ async function onDrawerConfirm() {
   const values = (await bookFormApi.validateAndSubmitForm()) as
     | (Pick<
         Book,
-        'author' | 'category' | 'current_stock' | 'isbn' | 'title' | 'total_stock'
+        | 'author'
+        | 'category'
+        | 'current_stock'
+        | 'introduction'
+        | 'isbn'
+        | 'title'
+        | 'total_stock'
       > & { cover_files?: UploadFile[] })
     | undefined;
 
@@ -873,7 +893,7 @@ onBeforeUnmount(() => {
         <ElTabPane v-if="drawerMode === 'create'" label="导入 Excel" name="import">
           <div class="space-y-3">
             <div class="text-muted-foreground text-sm">
-              仅上传文件，由后端解析入库（当前为静态页面占位）。
+              表头必含：isbn、add_stock；可选：title、author、category、cover_url、introduction（或“简介”）。
             </div>
             <ElUpload
               :auto-upload="false"

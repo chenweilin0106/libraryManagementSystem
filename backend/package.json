@@ -8,6 +8,7 @@
     "build:watch": "tsc -p tsconfig.json -w --preserveWatchOutput",
     "dev:tsx": "tsx watch src/server.ts",
     "backfill:phones": "pnpm build && node dist/scripts/backfill-user-phones.js",
+    "backfill:book-intros": "pnpm build && node dist/scripts/backfill-book-introductions.js",
     "seed:mock": "pnpm build && node dist/scripts/seed-from-vben-mock.js",
     "start": "node dist/server.js"
   },

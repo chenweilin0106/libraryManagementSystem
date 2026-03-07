@@ -6,6 +6,8 @@ import { clampPage, clampPageSize } from '../utils/datetime.js';
 import { throwHttpError } from '../utils/http-error.js';
 import { ok } from '../utils/response.js';
 
+const INTRODUCTION_MAX_LEN = 300;
+
 function toNonNegativeInt(value: unknown) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
@@ -30,6 +32,7 @@ function bookToApi(doc: BookDoc) {
     cover_url: doc.cover_url,
     created_at: doc.created_at.toISOString(),
     current_stock: doc.current_stock,
+    introduction: doc.introduction ?? '',
     is_deleted: doc.is_deleted,
     isbn: doc.isbn,
     title: doc.title,
@@ -79,6 +82,7 @@ export function registerBooksRoutes(router: Router) {
     const isbn = normalizeText(body.isbn);
     const title = normalizeText(body.title);
     const author = normalizeText(body.author);
+    const introduction = normalizeText(body.introduction);
     const category = normalizeText(body.category);
     const coverUrl = normalizeText(body.cover_url);
     const totalStock = toNonNegativeInt(body.total_stock);
@@ -86,6 +90,13 @@ export function registerBooksRoutes(router: Router) {
 
     if (!isbn || !title || !author || !category) {
       throwHttpError({ status: 400, message: 'BadRequest', error: '必填字段不能为空' });
+    }
+    if (introduction.length > INTRODUCTION_MAX_LEN) {
+      throwHttpError({
+        status: 400,
+        message: 'BadRequest',
+        error: `简介不能超过 ${INTRODUCTION_MAX_LEN} 字`,
+      });
     }
     if (totalStock === null) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'total_stock 不合法' });
@@ -107,6 +118,7 @@ export function registerBooksRoutes(router: Router) {
         isbn,
         title,
         author,
+        introduction,
         category,
         cover_url: coverUrl,
         total_stock: totalStock,
@@ -135,6 +147,7 @@ export function registerBooksRoutes(router: Router) {
     const nextIsbn = normalizeText(body.isbn);
     const title = normalizeText(body.title);
     const author = normalizeText(body.author);
+    const introduction = normalizeText(body.introduction);
     const category = normalizeText(body.category);
     const coverUrl = normalizeText(body.cover_url);
     const totalStock = toNonNegativeInt(body.total_stock);
@@ -142,6 +155,13 @@ export function registerBooksRoutes(router: Router) {
 
     if (!nextIsbn || !title || !author || !category) {
       throwHttpError({ status: 400, message: 'BadRequest', error: '必填字段不能为空' });
+    }
+    if (introduction.length > INTRODUCTION_MAX_LEN) {
+      throwHttpError({
+        status: 400,
+        message: 'BadRequest',
+        error: `简介不能超过 ${INTRODUCTION_MAX_LEN} 字`,
+      });
     }
     if (totalStock === null) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'total_stock 不合法' });
@@ -176,6 +196,7 @@ export function registerBooksRoutes(router: Router) {
           isbn: nextIsbn,
           title,
           author,
+          introduction,
           category,
           cover_url: coverUrl,
           total_stock: totalStock,

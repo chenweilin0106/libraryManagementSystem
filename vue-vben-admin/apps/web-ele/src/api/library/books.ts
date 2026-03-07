@@ -10,6 +10,7 @@ export namespace BooksApi {
     cover_url: string;
     created_at: string;
     current_stock: number;
+    introduction: string;
     is_deleted: boolean;
     isbn: string;
     title: string;
@@ -38,6 +39,7 @@ export namespace BooksApi {
     category: string;
     cover_url: string;
     current_stock: number;
+    introduction: string;
     isbn: string;
     title: string;
     total_stock: number;

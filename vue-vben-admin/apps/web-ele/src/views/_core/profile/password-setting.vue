@@ -7,6 +7,11 @@ import { ProfilePasswordSetting, z } from '@vben/common-ui';
 
 import { ElMessage } from 'element-plus';
 
+import { changeMyPasswordApi } from '#/api';
+import { useAuthStore } from '#/store';
+
+const authStore = useAuthStore();
+
 const formSchema = computed((): VbenFormSchema[] => {
   return [
     {
@@ -16,12 +21,25 @@ const formSchema = computed((): VbenFormSchema[] => {
       },
       fieldName: 'oldPassword',
       label: '旧密码',
+      rules: z.string().min(1, { message: '请输入旧密码' }),
     },
     {
       component: 'VbenInputPassword',
       componentProps: {
         passwordStrength: true,
         placeholder: '请输入新密码',
+      },
+      dependencies: {
+        rules(values) {
+          const oldPassword = String(values?.oldPassword ?? '');
+          return z
+            .string({ required_error: '请输入新密码' })
+            .min(1, { message: '请输入新密码' })
+            .refine((value) => value !== oldPassword, {
+              message: '新密码不能与旧密码相同',
+            });
+        },
+        triggerFields: ['oldPassword'],
       },
       fieldName: 'newPassword',
       label: '新密码',
@@ -50,12 +68,15 @@ const formSchema = computed((): VbenFormSchema[] => {
   ];
 });
 
-function handleSubmit() {
-  ElMessage.success('密码修改成功');
+async function handleSubmit(values: Record<string, any>) {
+  const oldPassword = String(values?.oldPassword ?? '');
+  const newPassword = String(values?.newPassword ?? '');
+  await changeMyPasswordApi({ newPassword, oldPassword });
+  ElMessage.success('密码修改成功，请重新登录');
+  await authStore.logout(true);
 }
 </script>
 
 <template>
   <ProfilePasswordSetting class="w-1/3" :form-schema="formSchema" @submit="handleSubmit" />
 </template>
-

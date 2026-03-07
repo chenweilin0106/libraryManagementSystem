@@ -75,3 +75,6 @@ export async function deleteSessionByRefreshToken(refreshToken: string) {
   await sessionsCol().deleteOne({ refresh_token: refreshToken });
 }
 
+export async function deleteSessionsByUserId(userId: ObjectId) {
+  await sessionsCol().deleteMany({ user_id: userId });
+}

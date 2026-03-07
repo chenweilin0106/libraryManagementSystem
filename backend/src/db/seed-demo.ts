@@ -11,16 +11,49 @@ type SeedBookMeta = {
   isbn: string;
   title: string;
   author: string;
+  introduction?: string;
   category: SeedBookCategory;
   cover_id?: number;
 };
 
 const SEED_BOOKS: SeedBookMeta[] = [
-  { isbn: '9780136083252', title: 'Clean Code', author: 'Robert Martin', category: '计算机', cover_id: 14415969 },
-  { isbn: '9780134494326', title: 'Clean Architecture', author: 'Robert Martin', category: '计算机', cover_id: 15093860 },
+  {
+    isbn: '9780136083252',
+    title: 'Clean Code',
+    author: 'Robert Martin',
+    category: '计算机',
+    cover_id: 14415969,
+    introduction:
+      '软件工匠经典之作，围绕命名、函数、注释、代码坏味道与重构等主题，给出可操作的编码与评审建议，帮助提升可读性与可维护性。',
+  },
+  {
+    isbn: '9780134494326',
+    title: 'Clean Architecture',
+    author: 'Robert Martin',
+    category: '计算机',
+    cover_id: 15093860,
+    introduction:
+      '从设计原则与架构边界出发，讲解如何让业务规则独立于框架、UI 与数据库，通过分层与依赖倒置实现可测试、可演进的系统结构。',
+  },
   { isbn: '9780137081073', title: 'The Clean Coder', author: 'Robert C. Martin', category: '计算机', cover_id: 11311437 },
-  { isbn: '9780201485677', title: 'Refactoring', author: 'Martin Fowler', category: '计算机', cover_id: 7087623 },
-  { isbn: '9783826697005', title: 'Design Patterns', author: 'Erich Gamma', category: '计算机', cover_id: 14637796 },
+  {
+    isbn: '9780201485677',
+    title: 'Refactoring',
+    author: 'Martin Fowler',
+    category: '计算机',
+    cover_id: 7087623,
+    introduction:
+      '系统讲解在不改变外部行为的前提下改进代码结构的方法，包含常见重构手法与示例，强调通过小步改动和测试支撑持续演进。',
+  },
+  {
+    isbn: '9783826697005',
+    title: 'Design Patterns',
+    author: 'Erich Gamma',
+    category: '计算机',
+    cover_id: 14637796,
+    introduction:
+      '“GoF 设计模式”代表作，总结创建型、结构型、行为型等经典模式及其适用场景，用统一语言描述可复用的面向对象设计经验。',
+  },
   { isbn: '9788131722428', title: 'The Pragmatic Programmer', author: 'Andrew Hunt', category: '计算机', cover_id: 14633759 },
   { isbn: '9783860635933', title: 'Code Complete - Deutsche AusgabeDer Second Edition', author: 'Steve McConnell', category: '计算机', cover_id: 11143454 },
   { isbn: '9780262046305', title: 'Introduction to Algorithms, Fourth Edition', author: 'Thomas H. Cormen', category: '计算机', cover_id: 13768952 },
@@ -32,7 +65,15 @@ const SEED_BOOKS: SeedBookMeta[] = [
   { isbn: '9780321601919', title: 'Continuous Delivery', author: 'Jez Humble', category: '计算机', cover_id: 6998977 },
   { isbn: '9781449335588', title: "You Don't Know JS", author: 'Kyle Simpson', category: '计算机', cover_id: 8117575 },
   { isbn: '9781449308841', title: 'JavaScript : the Definitive Guide', author: 'David Flanagan', category: '计算机' },
-  { isbn: '9780201791204', title: 'Effective Java(TM) Programming Language Guide with Java Class Libraries Posters', author: 'Joshua Bloch', category: '计算机', cover_id: 2334826 },
+  {
+    isbn: '9780201791204',
+    title: 'Effective Java(TM) Programming Language Guide with Java Class Libraries Posters',
+    author: 'Joshua Bloch',
+    category: '计算机',
+    cover_id: 2334826,
+    introduction:
+      '以条目形式总结 Java 实践经验，覆盖对象创建、泛型、并发、异常与 API 设计等主题，强调编写健壮、易用、可维护的代码。',
+  },
   { isbn: '9780596158064', title: 'Learning Python', author: 'Mark Lutz', category: '计算机', cover_id: 6283352 },
   { isbn: '9781491939369', title: 'Think Python', author: 'Allen B. Downey', category: '计算机', cover_id: 8183667 },
   { isbn: '9780321965516', title: "Don't Make Me Think, Revisited", author: 'Steve Krug', category: '计算机', cover_id: 7320872 },
@@ -145,6 +186,7 @@ export async function seedDemoDataIfEmpty() {
         isbn: meta.isbn,
         title: meta.title,
         author: meta.author,
+        introduction: meta.introduction ?? '',
         category: meta.category,
         cover_url: openLibraryCoverById(meta.cover_id, 'L'),
         total_stock,

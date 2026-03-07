@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import type { BasicOption } from '@vben/types';
-
 import type { VbenFormSchema } from '#/adapter/form';
 
 import { computed, onMounted, ref } from 'vue';
 
 import { ProfileBaseSetting } from '@vben/common-ui';
 
-import { getUserInfoApi } from '#/api';
+import { ElMessage } from 'element-plus';
+
+import { getUserInfoApi, updateMyProfileApi } from '#/api';
+import { useAuthStore } from '#/store';
 
 const profileBaseSettingRef = ref<any>();
 
-const MOCK_ROLES_OPTIONS: BasicOption[] = [
+const authStore = useAuthStore();
+
+const ROLE_OPTIONS = [
   {
     label: '管理员',
     value: 'super',
@@ -20,11 +23,13 @@ const MOCK_ROLES_OPTIONS: BasicOption[] = [
     label: '用户',
     value: 'user',
   },
-  {
-    label: '测试',
-    value: 'test',
-  },
 ];
+
+function maskCnPhone(value: string) {
+  const raw = String(value ?? '').trim();
+  if (!/^1[3-9]\d{9}$/.test(raw)) return raw;
+  return `${raw.slice(0, 3)}****${raw.slice(7)}`;
+}
 
 const formSchema = computed((): VbenFormSchema[] => {
   return [
@@ -35,6 +40,9 @@ const formSchema = computed((): VbenFormSchema[] => {
     },
     {
       component: 'Input',
+      componentProps: {
+        disabled: true,
+      },
       fieldName: 'username',
       label: '用户名',
     },
@@ -43,12 +51,22 @@ const formSchema = computed((): VbenFormSchema[] => {
       componentProps: {
         clearable: true,
         filterable: true,
+        disabled: true,
         multiple: true,
-        options: MOCK_ROLES_OPTIONS,
+        options: ROLE_OPTIONS,
         placeholder: '请选择角色',
       },
       fieldName: 'roles',
       label: '角色',
+    },
+    {
+      component: 'Input',
+      componentProps: {
+        disabled: true,
+        placeholder: '未绑定手机号',
+      },
+      fieldName: 'phone',
+      label: '手机',
     },
     {
       component: 'Input',
@@ -65,11 +83,26 @@ const formSchema = computed((): VbenFormSchema[] => {
 
 onMounted(async () => {
   const data = await getUserInfoApi();
-  profileBaseSettingRef.value?.getFormApi?.().setValues(data);
+  const viewData = { ...(data as any), phone: maskCnPhone((data as any)?.phone) };
+  profileBaseSettingRef.value?.getFormApi?.().setValues(viewData);
 });
+
+async function handleSubmit(values: Record<string, any>) {
+  const realName = String(values?.realName ?? '').trim();
+  const introduction = String(values?.introduction ?? '').trim();
+  await updateMyProfileApi({ introduction, realName });
+  ElMessage.success('基本信息已更新');
+
+  const userInfo = await authStore.fetchUserInfo();
+  const viewData = { ...(userInfo as any), phone: maskCnPhone((userInfo as any)?.phone) };
+  profileBaseSettingRef.value?.getFormApi?.().setValues(viewData);
+}
 </script>
 
 <template>
-  <ProfileBaseSetting ref="profileBaseSettingRef" :form-schema="formSchema" />
+  <ProfileBaseSetting
+    ref="profileBaseSettingRef"
+    :form-schema="formSchema"
+    @submit="handleSubmit"
+  />
 </template>
-

@@ -15,6 +15,7 @@ type ParsedRow = {
   isbn: string;
   title: string;
   author: string;
+  introduction: string;
   category: string;
   cover_url: string;
   add_stock: number;
@@ -182,6 +183,7 @@ export function registerBooksImportRoutes(router: Router) {
     const authorIdx = headerIndex.get('author');
     const categoryIdx = headerIndex.get('category');
     const coverUrlIdx = headerIndex.get('cover_url');
+    const introductionIdx = headerIndex.get('introduction') ?? headerIndex.get('简介');
 
     const rows: ParsedRow[] = [];
     for (let i = 1; i < table.length; i++) {
@@ -192,6 +194,9 @@ export function registerBooksImportRoutes(router: Router) {
       const isbnRaw = asCellText(rawRow[isbnIdx]);
       const titleRaw = asCellText(titleIdx == null ? '' : rawRow[titleIdx]);
       const authorRaw = asCellText(authorIdx == null ? '' : rawRow[authorIdx]);
+      const introductionRaw = asCellText(
+        introductionIdx == null ? '' : rawRow[introductionIdx],
+      );
       const categoryRaw = asCellText(categoryIdx == null ? '' : rawRow[categoryIdx]);
       const coverUrlRaw = asCellText(coverUrlIdx == null ? '' : rawRow[coverUrlIdx]);
       const addStockRaw = asCellText(rawRow[addStockIdx]);
@@ -201,6 +206,7 @@ export function registerBooksImportRoutes(router: Router) {
         !normalizeText(isbnRaw) &&
         !normalizeText(titleRaw) &&
         !normalizeText(authorRaw) &&
+        !normalizeText(introductionRaw) &&
         !normalizeText(categoryRaw) &&
         !normalizeText(coverUrlRaw) &&
         !normalizeText(addStockRaw)
@@ -211,6 +217,7 @@ export function registerBooksImportRoutes(router: Router) {
       const isbn = normalizeText(isbnRaw);
       const title = normalizeText(titleRaw);
       const author = normalizeText(authorRaw);
+      const introduction = normalizeText(introductionRaw);
       const category = normalizeText(categoryRaw);
       const { url: cover_url, error: coverUrlError } = parseCoverUrl(coverUrlRaw);
       const add_stock = toPositiveInt(addStockRaw) ?? 0;
@@ -219,12 +226,14 @@ export function registerBooksImportRoutes(router: Router) {
       if (!isbn) errors.push('ISBN 不能为空');
       if (!add_stock) errors.push('add_stock 必须是 >= 1 的整数');
       if (coverUrlError) errors.push(coverUrlError);
+      if (introduction.length > 300) errors.push('简介不能超过 300 字');
 
       rows.push({
         row_number,
         isbn,
         title,
         author,
+        introduction,
         category,
         cover_url,
         add_stock,
@@ -351,6 +360,7 @@ export function registerBooksImportRoutes(router: Router) {
             isbn,
             title: row.title,
             author: row.author,
+            introduction: row.introduction,
             category: row.category,
             cover_url: row.cover_url,
             total_stock: delta,
@@ -431,6 +441,7 @@ export function registerBooksImportRoutes(router: Router) {
       const set: Record<string, any> = {};
       if (row.title) set.title = row.title;
       if (row.author) set.author = row.author;
+      if (row.introduction) set.introduction = row.introduction;
       if (row.category) set.category = row.category;
       if (row.cover_url) set.cover_url = row.cover_url;
       if (shouldUnshelf) set.is_deleted = false;

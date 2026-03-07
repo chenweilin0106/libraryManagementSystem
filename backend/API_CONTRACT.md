@@ -206,6 +206,67 @@ type UploadResponseData = {
 
 ---
 
+## 2.8 个人中心-更新基本资料
+
+`PUT /api/user/profile`
+
+说明：
+
+- 仅允许更新**当前登录用户**（不允许传 userId）
+- `username/roles` 在个人中心中为只读；管理员如需修改角色，请到“用户管理”中操作
+
+请求体（JSON）：
+
+```ts
+type UpdateMyProfileBody = {
+  realName: string;
+  introduction?: string;
+  // avatar?: string; // 后续如接入头像上传再补齐
+};
+```
+
+成功响应：返回更新后的用户信息对象（通用结构 data 解包后为对象，字段以 `UserInfo` 为准）。
+
+错误：
+
+- 400：`realName` 为空
+- 401：未登录或登录已过期
+
+---
+
+## 2.9 个人中心-修改密码
+
+`PUT /api/user/password`
+
+请求体（JSON）：
+
+```ts
+type ChangeMyPasswordBody = {
+  oldPassword: string;
+  newPassword: string;
+};
+```
+
+成功响应：通用结构（`code===0`），`data` 返回空对象：
+
+```json
+{}
+```
+
+错误：
+
+- 400：参数缺失
+- 403：旧密码错误
+- 409：新密码与旧密码相同
+- 401：未登录或登录已过期
+
+重要说明（会话策略）：
+
+- 修改密码成功后，服务端会删除该用户的所有会话（access/refresh 同时失效）
+- 前端需要提示用户并**强制退出重新登录**
+
+---
+
 ## 3. 图书管理（Books）
 
 ### 3.1 列表分页/筛选
@@ -228,6 +289,7 @@ type BooksListResponseData = {
     isbn: string;
     title: string;
     author: string;
+    introduction: string; // 简介（<= 300 字；可为空字符串）
     category: string;
     cover_url: string;
     total_stock: number;
@@ -250,6 +312,7 @@ type CreateBookBody = {
   isbn: string;
   title: string;
   author: string;
+  introduction?: string;  // 简介（可选，<= 300 字）
   category: string;
   cover_url: string;
   total_stock: number;    // >= 0
@@ -330,6 +393,7 @@ Excel 模板列（第一行表头，字段名大小写不敏感）：
 - `isbn`（必填）
 - `title`（新书必填；老书可空）
 - `author`（新书必填；老书可空）
+- `introduction` 或 `简介`（可空，<= 300 字；仅在新书创建/覆盖策略下写入）
 - `category`（新书必填；老书可空）
 - `cover_url`（可空，线上图片 URL）
 - `add_stock`（必填，>= 1，本次入库数量）
