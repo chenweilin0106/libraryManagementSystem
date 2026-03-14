@@ -9,11 +9,15 @@
 - 接口契约文档：`backend/API_CONTRACT.md`（后端需与当前前端请求形态对齐）
 
 ## 前端当前约定（已裁剪后的目标形态）
-- 仅保留 4 个一级业务路由：
+- 管理员端仅保留 4 个一级业务路由：
   - `/analytics`（数据分析）
   - `/books`（图书管理）
   - `/borrows`（借阅管理）
   - `/users`（用户管理）
+- 用户端新增 3 个一级业务路由：
+  - `/user-reservations`（图书预定）
+  - `/user-borrow-records`（借阅记录）
+  - `/user-center`（个人中心）
 - 业务页面目录：`vue-vben-admin/apps/web-ele/src/views/library/*`
 - 业务路由模块：`vue-vben-admin/apps/web-ele/src/router/routes/modules/library.ts`
 
@@ -74,3 +78,80 @@
    - 只要涉及后端接口新增/修改（含字段/校验/鉴权/会话策略调整），开发完成后必须至少跑一遍冒烟
    - 冒烟形式不限（启动后端+前端走关键流程，或用脚本/curl 调用关键接口），但需要覆盖本次改动的主路径
    - 冒烟命令/步骤与结果需要补充记录到对应的计划文档（同版本号下追加即可）
+
+## Git 提交约定（重要）
+### 目标
+- 提交可审阅、可回滚、可定位问题：尽量“小步提交”，按功能/层次拆分。
+
+### 拆分原则
+- **不要合一笔提交**：后端/前端/文档尽量分开；同一层内也按“一个改动点一笔提交”拆。
+- 每笔提交尽量能独立说明问题与改动（避免“顺手改了很多小东西”混进同一笔）。
+- 尽量保持每笔提交编译/类型检查可通过（必要时可把依赖改动提前提交）。
+
+### 提交信息
+- 建议格式：`<type>(scope): <summary>`
+  - `type`：`feat`/`fix`/`refactor`/`chore`/`docs` 等
+  - `scope`：`backend`/`frontend`/`docs`/具体模块名
+  - `summary`：一句话说明做了什么
+
+### 不要提交的内容
+- 本地 IDE/个人环境文件（例如 `.idea/workspace.xml` 这类变动）默认不提交，除非团队明确需要共享。
+
+### 推送前自检
+- 后端：至少 `pnpm -C backend build`（或等价的 `tsc` 编译检查）
+- 前端：至少 `pnpm -C vue-vben-admin -F @vben/web-ele typecheck`（或等价的 `vue-tsc`）
+- 若跑了冒烟：把步骤/结果追加到对应计划文档的“冒烟记录”里。
+
+## 前端启动 + DevTools MCP（chrome-devtools）
+
+目标：方便让 Agent 启动 Element 前端，并用 MCP 自动打开浏览器进入页面做调试。
+
+- 启动前端（Element）：
+  - 在 `vue-vben-admin/` 下运行：`pnpm dev:ele`
+  - 等待 Vite 输出：`Local: http://localhost:<port>/`
+
+- 使用 DevTools MCP 打开页面（用于调试，不要求截图）：
+  - `mcp__chrome-devtools__new_page` 打开：`http://localhost:<port>/`
+  - `mcp__chrome-devtools__wait_for` 等待关键字（例如：`登录`）
+  - （可选）最大化窗口（等同点最大化）：`mcp__chrome-devtools__press_key` 发送 `Meta+ArrowUp`
+
+- 备注：
+  - MCP 启动的浏览器通常是隔离 profile（看起来“默认设置”）属于正常现象。
+  - 可能先出现 `about:blank` 标签页，属正常。
+
+- 停止前端：
+  - 启动终端 `Ctrl+C`；必要时用 `netstat -ano | findstr :<port>` 找 PID，再 `taskkill /PID <pid> /F`
+
+## Page + 表格页（VxeGrid）使用注意
+背景：表格页常用 `gridOptions.height: 'auto'`（自适应），如果外层容器高度不受控，会导致页面被表格内容不断撑高，看起来像“高度无限扩大”。
+
+推荐写法（对齐官方示例）：
+- **页面层**：表格页统一用 `<Page auto-content-height>` 限制内容区高度，让内容区滚动而不是整页增长。
+- **表格层**：`gridOptions.height: 'auto'`，不要写死像素高度（除非你明确想要固定高度的表格容器）。
+
+最小示例（Page 限高 + Table 自适应）：
+```vue
+<script lang="ts" setup>
+import type { VxeGridProps } from '#/adapter/vxe-table';
+import { Page } from '@vben/common-ui';
+import { useVbenVxeGrid } from '#/adapter/vxe-table';
+
+const gridOptions: VxeGridProps<any> = { height: 'auto', columns: [], data: [] };
+const [Grid] = useVbenVxeGrid({ gridOptions });
+</script>
+
+<template>
+  <Page auto-content-height title="列表页">
+    <Grid />
+  </Page>
+</template>
+```
+
+## 开发要求（UI/交互）
+### 图片展示
+- 展示图片默认使用可预览组件：优先 `ElImage` + `preview-src-list` + `preview-teleported`，并提供加载失败兜底（占位图）。
+
+### 数据操作
+- 所有“会改变数据”的操作（新增/编辑/删除/下架/上架/借阅/还书/预约/取消预约等）默认需要二次确认：
+  - 使用 `ElMessageBox.confirm(...)`，点击取消要 `try/catch` 直接 return。
+  - 成功给 `ElMessage.success(...)`；失败由全局请求错误提示展示后端原因（如“无库存/已下架/权限不足”等）。
