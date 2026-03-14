@@ -475,6 +475,9 @@ type BooksImportCommitResponseData = {
 
 `GET /api/borrows`
 
+权限：
+- 管理员接口（`role=admin`）
+
 Query：
 
 - `page`, `pageSize`
@@ -494,6 +497,7 @@ type BorrowRecord = {
   book_id: string;
   isbn: string;
   book_title: string;
+  raw_status: 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled'; // 数据库原始状态
   status: 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled';
   borrow_date: string;        // 'YYYY-MM-DD HH:mm:ss'
   due_date: string;           // 'YYYY-MM-DD HH:mm:ss'
@@ -508,9 +512,29 @@ type BorrowsListResponseData = {
 };
 ```
 
+### 4.1.1 我的借阅/预约记录
+
+`GET /api/borrows/my`
+
+权限：
+- 登录用户可用（仅返回自己的记录；忽略前端传入的 username 等字段）
+
+Query：
+
+- `page`, `pageSize`
+- `isbn?`
+- `status?`: `'all' | 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled'`
+- `borrowStart?`, `borrowEnd?`（毫秒）
+- `returnStart?`, `returnEnd?`（毫秒）
+
+返回同 `BorrowRecord` + `BorrowsListResponseData`。
+
 ### 4.2 借书
 
 `POST /api/borrows/borrow`
+
+权限：
+- 管理员接口（`role=admin`）
 
 Body：
 
@@ -561,9 +585,50 @@ type BorrowBookResponseData = {
 
 - 借书成功需要**扣减库存**（`current_stock - 1`），需要事务或原子更新保证不出现负库存
 
+补充约定（预约取书）：
+- 若同一用户同一本书存在“待取书（reserved）且未取消/未归还”记录，则本接口会将该记录转为 `borrowed`（不重复扣库存）。
+
+### 4.2.1 预约（用户端）
+
+`POST /api/borrows/reserve`
+
+权限：
+- 登录用户可用（为自己预约）
+
+Body：
+
+```ts
+type ReserveBookBody = {
+  isbn: string;
+};
+```
+
+业务约束：
+- 图书不存在/下架/无库存：返回 404/409
+- 同一用户同一本书存在未结束记录：不可重复预约（409）
+- 存在逾期未处理记录：禁止预约（409）
+
+成功返回结构与 `BorrowBookResponseData` 一致（`record.status = 'reserved'`）。
+
+### 4.2.2 取消预约（用户端）
+
+`PUT /api/borrows/:recordId/cancel`
+
+权限：
+- 登录用户可用（仅允许取消自己的记录）
+
+业务约束：
+- 仅 `raw_status='reserved'` 的记录允许取消（409）
+- 取消成功需要**回补库存**（`current_stock + 1`，不超过 `total_stock`）
+
+成功返回：`BorrowRecord`
+
 ### 4.3 还书
 
 `PUT /api/borrows/:recordId/return`
+
+权限：
+- 管理员接口（`role=admin`）
 
 Body：
 

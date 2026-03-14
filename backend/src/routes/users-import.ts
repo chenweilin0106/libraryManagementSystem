@@ -5,6 +5,7 @@ import { ObjectId } from 'mongodb';
 import * as XLSX from 'xlsx';
 
 import { usersCol, type UserDoc, type UserRole, type UserStatus } from '../db/collections.js';
+import { requireAdmin } from '../utils/authz.js';
 import { hashPassword } from '../utils/crypto.js';
 import { throwHttpError } from '../utils/http-error.js';
 import { ok } from '../utils/response.js';
@@ -143,6 +144,7 @@ async function findExistingByPhonesAndUsernames(input: {
 
 export function registerUsersImportRoutes(router: Router) {
   router.post('/users/import/preview', async (ctx) => {
+    requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const dataUrl = String(body.dataUrl ?? '').trim();
     if (!dataUrl) {
@@ -313,6 +315,7 @@ export function registerUsersImportRoutes(router: Router) {
   });
 
   router.post('/users/import/commit', async (ctx) => {
+    requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const import_id = String(body.import_id ?? '').trim();
 

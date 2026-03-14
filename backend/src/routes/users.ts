@@ -5,6 +5,7 @@ import type { Filter } from 'mongodb';
 import { usersCol, type UserDoc, type UserRole, type UserStatus } from '../db/collections.js';
 import { hashPassword } from '../utils/crypto.js';
 import { clampPage, clampPageSize } from '../utils/datetime.js';
+import { requireAdmin } from '../utils/authz.js';
 import { throwHttpError } from '../utils/http-error.js';
 import { ok } from '../utils/response.js';
 
@@ -75,6 +76,7 @@ function userToApi(doc: UserDoc) {
 
 export function registerUsersRoutes(router: Router) {
   router.get('/users', async (ctx) => {
+    requireAdmin(ctx);
     const page = clampPage(Number(ctx.query.page), 1);
     const pageSize = clampPageSize(Number(ctx.query.pageSize), 20, 100);
     const skip = (page - 1) * pageSize;
@@ -104,6 +106,7 @@ export function registerUsersRoutes(router: Router) {
   });
 
   router.post('/users', async (ctx) => {
+    requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const usernameRaw = normalizeText(body.username);
     const { raw: username, lower: usernameLower } = normalizeUsername(usernameRaw);
@@ -161,6 +164,7 @@ export function registerUsersRoutes(router: Router) {
   });
 
   router.put('/users/:id', async (ctx) => {
+    requireAdmin(ctx);
     const id = normalizeText(ctx.params.id);
     let objectId: ObjectId;
     try {
@@ -252,6 +256,7 @@ export function registerUsersRoutes(router: Router) {
   });
 
   router.put('/users/:id/reset-password', async (ctx) => {
+    requireAdmin(ctx);
     const id = normalizeText(ctx.params.id);
     let objectId: ObjectId;
     try {
@@ -277,6 +282,7 @@ export function registerUsersRoutes(router: Router) {
   });
 
   router.delete('/users/:id', async (ctx) => {
+    requireAdmin(ctx);
     const id = normalizeText(ctx.params.id);
     let objectId: ObjectId;
     try {

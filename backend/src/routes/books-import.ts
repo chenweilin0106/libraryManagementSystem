@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import * as XLSX from 'xlsx';
 
 import { booksCol, type BookDoc } from '../db/collections.js';
+import { requireAdmin } from '../utils/authz.js';
 import { throwHttpError } from '../utils/http-error.js';
 import { ok } from '../utils/response.js';
 
@@ -128,6 +129,7 @@ async function findExistingBooks(isbns: string[]) {
 
 export function registerBooksImportRoutes(router: Router) {
   router.post('/books/import/preview', async (ctx) => {
+    requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const dataUrl = String(body.dataUrl ?? '').trim();
     if (!dataUrl) {
@@ -290,6 +292,7 @@ export function registerBooksImportRoutes(router: Router) {
   });
 
   router.post('/books/import/commit', async (ctx) => {
+    requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const import_id = String(body.import_id ?? '').trim();
     const conflict_strategy = body.conflict_strategy;

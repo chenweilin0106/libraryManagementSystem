@@ -11,14 +11,15 @@ function normalizeText(value: unknown) {
 }
 
 function toUserInfo(user: UserDoc, accessToken: string) {
+  const isAdmin = user.role === 'admin';
   return {
     avatar: user.avatar || '',
-    desc: user.role === 'admin' ? '管理员' : '读者',
-    homePath: '/analytics',
+    desc: isAdmin ? '管理员' : '读者',
+    homePath: isAdmin ? '/analytics' : '/user-reservations',
     introduction: normalizeText((user as any).introduction),
     phone: normalizeText((user as any).phone),
     realName: normalizeText((user as any).real_name) || user.username,
-    roles: [user.role === 'admin' ? 'super' : 'user'],
+    roles: [isAdmin ? 'super' : 'user'],
     token: accessToken || '',
     userId: user._id.toHexString(),
     username: user.username,

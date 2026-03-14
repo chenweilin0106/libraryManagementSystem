@@ -1,6 +1,7 @@
 import Router from '@koa/router';
 
 import { booksCol, borrowsCol, usersCol } from '../db/collections.js';
+import { requireAdmin } from '../utils/authz.js';
 import { ok } from '../utils/response.js';
 
 type AnalyticsOverviewData = {
@@ -526,6 +527,7 @@ function normalizeMode(input: unknown): AnalyticsOverviewMode {
 
 export function registerAnalyticsRoutes(router: Router) {
   router.get('/analytics/overview', async (ctx) => {
+    requireAdmin(ctx);
     const mode = normalizeMode(ctx.query.mode);
     const data = await getAnalyticsOverview(mode);
     ok(ctx, data);

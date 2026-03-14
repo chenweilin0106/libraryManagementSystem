@@ -2,6 +2,7 @@ import Router from '@koa/router';
 import type { Filter } from 'mongodb';
 
 import { booksCol, type BookDoc } from '../db/collections.js';
+import { requireAdmin } from '../utils/authz.js';
 import { clampPage, clampPageSize } from '../utils/datetime.js';
 import { throwHttpError } from '../utils/http-error.js';
 import { ok } from '../utils/response.js';
@@ -78,6 +79,7 @@ export function registerBooksRoutes(router: Router) {
   });
 
   router.post('/books', async (ctx) => {
+    requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const isbn = normalizeText(body.isbn);
     const title = normalizeText(body.title);
@@ -138,6 +140,7 @@ export function registerBooksRoutes(router: Router) {
   });
 
   router.put('/books/:isbn', async (ctx) => {
+    requireAdmin(ctx);
     const originalIsbn = String(ctx.params.isbn ?? '').trim();
     if (!originalIsbn) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'ISBN 不能为空' });
@@ -210,6 +213,7 @@ export function registerBooksRoutes(router: Router) {
   });
 
   router.put('/books/:isbn/shelf', async (ctx) => {
+    requireAdmin(ctx);
     const isbn = String(ctx.params.isbn ?? '').trim();
     if (!isbn) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'ISBN 不能为空' });
