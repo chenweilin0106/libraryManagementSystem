@@ -16,6 +16,7 @@ export namespace BorrowsApi {
     due_date: string;
     fine_amount: number;
     isbn: string;
+    raw_status?: BorrowStatus;
     record_id: string;
     return_date?: string;
     status: BorrowStatus;
@@ -57,6 +58,10 @@ export namespace BorrowsApi {
     book: unknown;
     record: BorrowRecord;
   }
+
+  export interface ReserveBody {
+    isbn: string;
+  }
 }
 
 export async function listBorrowsApi(params: BorrowsApi.ListParams) {
@@ -74,5 +79,23 @@ export async function returnBookApi(recordId: string, data: BorrowsApi.ReturnBod
   return requestClient.put<BorrowsApi.BorrowRecord>(
     `/borrows/${encodeURIComponent(recordId)}/return`,
     data,
+  );
+}
+
+export async function listMyBorrowsApi(params: Omit<BorrowsApi.ListParams, 'username'>) {
+  return requestClient.get<BorrowsApi.PageResult<BorrowsApi.BorrowRecord>>(
+    '/borrows/my',
+    { params },
+  );
+}
+
+export async function reserveBorrowApi(data: BorrowsApi.ReserveBody) {
+  return requestClient.post<BorrowsApi.BorrowResult>('/borrows/reserve', data);
+}
+
+export async function cancelBorrowReservationApi(recordId: string) {
+  return requestClient.put<BorrowsApi.BorrowRecord>(
+    `/borrows/${encodeURIComponent(recordId)}/cancel`,
+    {},
   );
 }

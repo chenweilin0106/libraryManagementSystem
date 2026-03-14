@@ -16,7 +16,8 @@
     "analytics": "数据分析",
     "books": "图书管理",
     "borrows": "借阅管理",
+    "userBorrowRecords": "借阅记录",
+    "userReservations": "图书预定",
     "users": "用户管理"
   }
 }
-

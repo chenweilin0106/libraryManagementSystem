@@ -16,6 +16,8 @@
     "analytics": "Analytics",
     "books": "Books",
     "borrows": "Borrows",
+    "userBorrowRecords": "Borrow Records",
+    "userReservations": "Reservations",
     "users": "Users"
   }
 }
