@@ -871,8 +871,49 @@ onBeforeUnmount(() => {
 <template>
   <Page auto-content-height>
     <Drawer :title="drawerTitle" class="w-[720px]">
-      <ElTabs v-model="drawerActiveTab" class="mt-2">
-        <ElTabPane label="手动录入" name="manual">
+      <template v-if="drawerMode === 'create'">
+        <ElTabs v-model="drawerActiveTab" class="mt-2">
+          <ElTabPane label="手动录入" name="manual">
+            <BookForm>
+              <template #cover_files="slotProps">
+                <ElUpload
+                  v-bind="slotProps"
+                  :auto-upload="false"
+                  :limit="1"
+                  accept="image/*"
+                  list-type="picture-card"
+                  @change="onCoverUploadChange"
+                  @exceed="onCoverExceed"
+                  @preview="onCoverUploadPreview"
+                >
+                  <ElButton type="primary">选择封面</ElButton>
+                </ElUpload>
+              </template>
+            </BookForm>
+          </ElTabPane>
+          <ElTabPane label="导入 Excel" name="import">
+            <div class="space-y-3">
+              <div class="text-muted-foreground text-sm">
+                表头必含：isbn、add_stock；可选：title、author、category、cover_url、introduction（或“简介”）。
+              </div>
+              <ElUpload
+                :auto-upload="false"
+                :file-list="uploadFileList"
+                :limit="1"
+                accept=".xlsx,.xls"
+                @change="onUploadChange"
+              >
+                <ElButton type="primary">选择 Excel 文件</ElButton>
+              </ElUpload>
+              <div class="text-muted-foreground text-sm">
+                提示：选择文件后，点击右下角“{{ drawerConfirmText }}”继续。
+              </div>
+            </div>
+          </ElTabPane>
+        </ElTabs>
+      </template>
+      <template v-else>
+        <div class="mt-2">
           <BookForm>
             <template #cover_files="slotProps">
               <ElUpload
@@ -889,27 +930,8 @@ onBeforeUnmount(() => {
               </ElUpload>
             </template>
           </BookForm>
-        </ElTabPane>
-        <ElTabPane v-if="drawerMode === 'create'" label="导入 Excel" name="import">
-          <div class="space-y-3">
-            <div class="text-muted-foreground text-sm">
-              表头必含：isbn、add_stock；可选：title、author、category、cover_url、introduction（或“简介”）。
-            </div>
-            <ElUpload
-              :auto-upload="false"
-              :file-list="uploadFileList"
-              :limit="1"
-              accept=".xlsx,.xls"
-              @change="onUploadChange"
-            >
-              <ElButton type="primary">选择 Excel 文件</ElButton>
-            </ElUpload>
-            <div class="text-muted-foreground text-sm">
-              提示：选择文件后，点击右下角“{{ drawerConfirmText }}”继续。
-            </div>
-          </div>
-        </ElTabPane>
-      </ElTabs>
+        </div>
+      </template>
     </Drawer>
 
     <Grid table-title="图书列表">
