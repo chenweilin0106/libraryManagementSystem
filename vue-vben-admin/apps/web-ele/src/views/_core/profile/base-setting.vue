@@ -16,27 +16,29 @@ const authStore = useAuthStore();
 
 const ROLE_OPTIONS = [
   {
-    label: '管理员',
+    label: '超级管理员',
     value: 'super',
   },
   {
-    label: '用户',
+    label: '管理员',
+    value: 'admin',
+  },
+  {
+    label: '读者',
     value: 'user',
   },
 ];
-
-function maskCnPhone(value: string) {
-  const raw = String(value ?? '').trim();
-  if (!/^1[3-9]\d{9}$/.test(raw)) return raw;
-  return `${raw.slice(0, 3)}****${raw.slice(7)}`;
-}
 
 const formSchema = computed((): VbenFormSchema[] => {
   return [
     {
       component: 'Input',
+      componentProps: {
+        placeholder: '请输入昵称',
+      },
       fieldName: 'realName',
-      label: '姓名',
+      label: '昵称',
+      rules: 'required',
     },
     {
       component: 'Input',
@@ -62,11 +64,11 @@ const formSchema = computed((): VbenFormSchema[] => {
     {
       component: 'Input',
       componentProps: {
-        disabled: true,
-        placeholder: '未绑定手机号',
+        placeholder: '请输入手机号',
       },
       fieldName: 'phone',
-      label: '手机',
+      label: '手机号',
+      rules: 'cnPhone',
     },
     {
       component: 'Input',
@@ -83,19 +85,18 @@ const formSchema = computed((): VbenFormSchema[] => {
 
 onMounted(async () => {
   const data = await getUserInfoApi();
-  const viewData = { ...(data as any), phone: maskCnPhone((data as any)?.phone) };
-  profileBaseSettingRef.value?.getFormApi?.().setValues(viewData);
+  profileBaseSettingRef.value?.getFormApi?.().setValues(data as any);
 });
 
 async function handleSubmit(values: Record<string, any>) {
   const realName = String(values?.realName ?? '').trim();
   const introduction = String(values?.introduction ?? '').trim();
-  await updateMyProfileApi({ introduction, realName });
+  const phone = String(values?.phone ?? '').trim();
+  await updateMyProfileApi({ introduction, phone, realName });
   ElMessage.success('基本信息已更新');
 
   const userInfo = await authStore.fetchUserInfo();
-  const viewData = { ...(userInfo as any), phone: maskCnPhone((userInfo as any)?.phone) };
-  profileBaseSettingRef.value?.getFormApi?.().setValues(viewData);
+  profileBaseSettingRef.value?.getFormApi?.().setValues(userInfo as any);
 }
 </script>
 

@@ -5,7 +5,7 @@ import { ObjectId } from 'mongodb';
 import * as XLSX from 'xlsx';
 
 import { usersCol, type UserDoc, type UserRole, type UserStatus } from '../db/collections.js';
-import { requireAdmin } from '../utils/authz.js';
+import { canAssignRole, requireAdmin } from '../utils/authz.js';
 import { hashPassword } from '../utils/crypto.js';
 import { throwHttpError } from '../utils/http-error.js';
 import { bumpRedisVersion } from '../utils/redis-cache.js';
@@ -63,7 +63,7 @@ function parseCnPhone(value: unknown) {
 
 function parseRole(value: unknown): UserRole | null {
   const v = normalizeText(value).toLowerCase();
-  if (v === 'admin' || v === 'user') return v;
+  if (v === 'super' || v === 'admin' || v === 'user') return v;
   return null;
 }
 
@@ -145,7 +145,7 @@ async function findExistingByPhonesAndUsernames(input: {
 
 export function registerUsersImportRoutes(router: Router) {
   router.post('/users/import/preview', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const dataUrl = String(body.dataUrl ?? '').trim();
     if (!dataUrl) {
@@ -240,6 +240,9 @@ export function registerUsersImportRoutes(router: Router) {
       if (username && PROTECTED_USERNAMES.has(usernameLower)) errors.push('禁止使用内置账号用户名');
       if (phoneError) errors.push(phoneError);
       if (roleRaw && !role) errors.push('role 不合法');
+      if (role && !canAssignRole(auth.role, role)) {
+        errors.push('当前角色不能导入该角色用户');
+      }
       if (statusRaw && status === null) errors.push('status 不合法');
       if (creditError) errors.push(creditError);
 
@@ -316,7 +319,7 @@ export function registerUsersImportRoutes(router: Router) {
   });
 
   router.post('/users/import/commit', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const import_id = String(body.import_id ?? '').trim();
 
@@ -354,6 +357,9 @@ export function registerUsersImportRoutes(router: Router) {
 
     for (const row of rows) {
       const baseErrors = [...row.errors];
+      if (!canAssignRole(auth.role, row.role)) {
+        baseErrors.push('当前角色不能导入该角色用户');
+      }
       if (row.phone && byPhone.get(row.phone)) baseErrors.push('手机号已存在');
       if (row.username_lower && byUsernameLower.get(row.username_lower)) baseErrors.push('username 已存在');
 

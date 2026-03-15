@@ -1,25 +1,56 @@
 import Router from '@koa/router';
 
 import { deleteSessionsByUserId } from '../db/auth.js';
-import { usersCol, type UserDoc } from '../db/collections.js';
+import { usersCol, type UserDoc, type UserRole } from '../db/collections.js';
 import { hashPassword, verifyPassword } from '../utils/crypto.js';
 import { throwHttpError } from '../utils/http-error.js';
 import { ok } from '../utils/response.js';
+
+const CN_PHONE_RE = /^1[3-9]\d{9}$/;
 
 function normalizeText(value: unknown) {
   return String(value ?? '').trim();
 }
 
+function parseCnPhone(value: unknown) {
+  const phone = normalizeText(value).replaceAll(/\s+/g, '');
+  if (!phone) return { phone: '', error: '手机号不能为空' };
+  if (!CN_PHONE_RE.test(phone)) return { phone, error: '手机号格式不合法' };
+  return { phone, error: '' };
+}
+
+function getUserRoleMeta(role: UserRole) {
+  if (role === 'super') {
+    return {
+      desc: '超级管理员',
+      homePath: '/analytics',
+      roleCode: 'super',
+    };
+  }
+  if (role === 'admin') {
+    return {
+      desc: '管理员',
+      homePath: '/analytics',
+      roleCode: 'admin',
+    };
+  }
+  return {
+    desc: '读者',
+    homePath: '/user-reservations',
+    roleCode: 'user',
+  };
+}
+
 function toUserInfo(user: UserDoc, accessToken: string) {
-  const isAdmin = user.role === 'admin';
+  const roleMeta = getUserRoleMeta(user.role);
   return {
     avatar: user.avatar || '',
-    desc: isAdmin ? '管理员' : '读者',
-    homePath: isAdmin ? '/analytics' : '/user-reservations',
+    desc: roleMeta.desc,
+    homePath: roleMeta.homePath,
     introduction: normalizeText((user as any).introduction),
     phone: normalizeText((user as any).phone),
     realName: normalizeText((user as any).real_name) || user.username,
-    roles: [isAdmin ? 'super' : 'user'],
+    roles: [roleMeta.roleCode],
     token: accessToken || '',
     userId: user._id.toHexString(),
     username: user.username,
@@ -62,16 +93,30 @@ export function registerUserRoutes(router: Router) {
       Object.prototype.hasOwnProperty.call(body, 'introduction')
         ? normalizeText(body.introduction)
         : undefined;
+    const phone =
+      Object.prototype.hasOwnProperty.call(body, 'phone') ? parseCnPhone(body.phone) : null;
     const avatar =
       Object.prototype.hasOwnProperty.call(body, 'avatar') ? normalizeText(body.avatar) : undefined;
+
+    if (phone?.error) {
+      throwHttpError({ status: 400, message: 'BadRequest', error: phone.error });
+    }
 
     const $set: Record<string, any> = {
       real_name: realName,
     };
     if (introduction !== undefined) $set.introduction = introduction;
+    if (phone) $set.phone = phone.phone;
     if (avatar !== undefined) $set.avatar = avatar;
 
-    await usersCol().updateOne({ _id: user._id }, { $set });
+    try {
+      await usersCol().updateOne({ _id: user._id }, { $set });
+    } catch (error: any) {
+      if (error?.code === 11000 && error?.keyPattern?.phone) {
+        throwHttpError({ status: 409, message: 'Conflict', error: '手机号已存在' });
+      }
+      throw error;
+    }
     const updated = await usersCol().findOne({ _id: user._id });
     if (!updated) {
       throwHttpError({ status: 404, message: 'NotFound', error: '用户不存在或已被删除' });

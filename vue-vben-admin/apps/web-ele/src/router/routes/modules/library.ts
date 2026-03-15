@@ -4,8 +4,10 @@ import { $t } from '#/locales';
 
 const ENABLE_ADMIN_USER_PAGES =
   import.meta.env.VITE_ENABLE_ADMIN_USER_PAGES === 'true';
-const ADMIN_AUTHORITY = ['super'];
-const USER_AUTHORITY = ENABLE_ADMIN_USER_PAGES ? ['user', 'super'] : ['user'];
+const ADMIN_AUTHORITY = ['admin', 'super'];
+const USER_AUTHORITY = ENABLE_ADMIN_USER_PAGES
+  ? ['user', 'admin', 'super']
+  : ['user'];
 
 const routes: RouteRecordRaw[] = [
   {
@@ -28,17 +30,6 @@ const routes: RouteRecordRaw[] = [
       icon: 'lucide:history',
       order: -10,
       title: $t('page.library.userBorrowRecords'),
-    },
-  },
-  {
-    name: 'UserCenter',
-    path: '/user-center',
-    component: () => import('#/views/_core/profile/index.vue'),
-    meta: {
-      authority: USER_AUTHORITY,
-      icon: 'lucide:user',
-      order: 0,
-      title: $t('page.auth.profile'),
     },
   },
   {

@@ -18,6 +18,8 @@ import { preferences } from '@vben/preferences';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { openWindow } from '@vben/utils';
 
+import { ElTag } from 'element-plus';
+
 import { $t } from '#/locales';
 import { useAuthStore } from '#/store';
 import LoginForm from '#/views/_core/authentication/login.vue';
@@ -136,6 +138,34 @@ const avatar = computed(() => {
   return userStore.userInfo?.avatar ?? preferences.app.defaultAvatar;
 });
 
+const displayName = computed(() => {
+  return userStore.userInfo?.realName || userStore.userInfo?.username || '';
+});
+
+const phoneDescription = computed(() => {
+  return String(userStore.userInfo?.phone ?? '').trim() || '未绑定手机号';
+});
+
+const currentRole = computed(() => {
+  const role = String(userStore.userInfo?.roles?.[0] ?? '').trim();
+  if (role === 'super' || role === 'admin' || role === 'user') {
+    return role;
+  }
+  return 'user';
+});
+
+const currentRoleTagText = computed(() => {
+  if (currentRole.value === 'super') return 'super';
+  if (currentRole.value === 'admin') return 'admin';
+  return 'reader';
+});
+
+const currentRoleTagType = computed(() => {
+  if (currentRole.value === 'super') return 'danger';
+  if (currentRole.value === 'admin') return 'warning';
+  return 'info';
+});
+
 async function handleLogout() {
   await authStore.logout(false);
 }
@@ -167,8 +197,7 @@ watch(
     if (enable) {
       await updateWatermark({
         content:
-          content ||
-          `${userStore.userInfo?.username} - ${userStore.userInfo?.realName}`,
+          content || `${userStore.userInfo?.username} - ${displayName.value}`,
       });
     } else {
       destroyWatermark();
@@ -186,11 +215,22 @@ watch(
       <UserDropdown
         :avatar
         :menus
-        :text="userStore.userInfo?.realName"
-        description="ann.vben@gmail.com"
-        tag-text="Pro"
+        :description="phoneDescription"
+        :text="displayName"
         @logout="handleLogout"
-      />
+      >
+        <template #tagText>
+          <ElTag
+            v-if="currentRoleTagText"
+            :type="currentRoleTagType"
+            class="ml-2"
+            effect="plain"
+            size="small"
+          >
+            {{ currentRoleTagText }}
+          </ElTag>
+        </template>
+      </UserDropdown>
     </template>
     <template v-if="showNotification" #notification>
       <Notification

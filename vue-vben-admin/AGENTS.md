@@ -14,7 +14,7 @@
 - 用户端新增 3 个一级业务路由：
   - `/user-reservations`（图书预定）
   - `/user-borrow-records`（借阅记录）
-  - `/user-center`（个人中心）
+  - `/profile`（个人中心）
 - 业务路由模块：`apps/web-ele/src/router/routes/modules/library.ts`
 - 业务页面目录：`apps/web-ele/src/views/library/*`
 - 已移除演示/概览相关路由与页面目录：`dashboard`、`demos`、`vben`、`profile`、`about` 等

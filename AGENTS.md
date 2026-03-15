@@ -17,7 +17,7 @@
 - 用户端新增 3 个一级业务路由：
   - `/user-reservations`（图书预定）
   - `/user-borrow-records`（借阅记录）
-  - `/user-center`（个人中心）
+  - `/profile`（个人中心）
 - 重要：管理员端默认**不展示**用户端 3 个路由菜单。如需管理员联调用户端页面，请显式设置前端环境变量 `VITE_ENABLE_ADMIN_USER_PAGES=true` 并重启前端（默认保持关闭，避免出现多余菜单）。
 - 业务页面目录：`vue-vben-admin/apps/web-ele/src/views/library/*`
 - 业务路由模块：`vue-vben-admin/apps/web-ele/src/router/routes/modules/library.ts`

@@ -1,12 +1,12 @@
 import Router from '@koa/router';
 
-import { getAuthState } from '../utils/authz.js';
+import { getAuthState, isManagerRole } from '../utils/authz.js';
 import { ok } from '../utils/response.js';
 
 export function registerMenuRoutes(router: Router) {
   router.get('/menu/all', async (ctx) => {
     const auth = getAuthState(ctx);
-    const isAdmin = auth.role === 'admin';
+    const isAdmin = isManagerRole(auth.role);
 
     ok(ctx, [
       {
@@ -84,8 +84,8 @@ export function registerMenuRoutes(router: Router) {
                 },
               },
               {
-                name: 'UserCenter',
-                path: '/user-center',
+                name: 'Profile',
+                path: '/profile',
                 component: '/_core/profile/index.vue',
                 meta: {
                   icon: 'lucide:user',

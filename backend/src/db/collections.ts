@@ -2,7 +2,7 @@ import type { Collection, ObjectId } from 'mongodb';
 
 import { getMongoDb } from './mongo.js';
 
-export type UserRole = 'admin' | 'user';
+export type UserRole = 'super' | 'admin' | 'user';
 export type UserStatus = 0 | 1;
 
 export type UserDoc = {

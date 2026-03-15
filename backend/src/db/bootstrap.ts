@@ -139,7 +139,7 @@ export async function bootstrapMongo() {
   await sessionsCol().createIndex({ refresh_expires_at: 1 }, { expireAfterSeconds: 0 });
 
   await ensureUser('admin', 'admin');
-  await ensureUser('vben', 'user');
+  await ensureUser('vben', 'super');
 
   await seedDemoDataIfEmpty();
 }

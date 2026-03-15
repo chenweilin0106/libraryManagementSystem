@@ -8,12 +8,11 @@ const routes: RouteRecordRaw[] = [
     path: '/profile',
     component: () => import('#/views/_core/profile/index.vue'),
     meta: {
-      hideInMenu: true,
       icon: 'lucide:user',
+      order: 0,
       title: $t('page.auth.profile'),
     },
   },
 ];
 
 export default routes;
-

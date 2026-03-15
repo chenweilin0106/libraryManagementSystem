@@ -5,6 +5,7 @@ import { requestClient } from '#/api/request';
 export namespace UserApi {
   export type UpdateMyProfileBody = {
     introduction?: string;
+    phone?: string;
     realName: string;
   };
 
