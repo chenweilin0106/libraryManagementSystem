@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import type { VbenFormProps } from '#/adapter/form';
-import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { VxeGridListeners, VxeGridProps } from '#/adapter/vxe-table';
 
 import { ref } from 'vue';
 
@@ -25,11 +25,20 @@ defineOptions({ name: 'UserBorrowRecords' });
 type BorrowStatus = BorrowsApi.BorrowStatus;
 type BorrowRecord = BorrowsApi.BorrowRecord;
 type Book = BooksApi.Book;
+type BorrowSortBy = NonNullable<BorrowsApi.ListParams['sortBy']>;
+type BorrowSortOrder = NonNullable<BorrowsApi.ListParams['sortOrder']>;
 
 const gridPager = ref({ currentPage: 1, pageSize: 20 });
 const cancelingRecordId = ref<string>('');
 const activeRecord = ref<BorrowRecord | null>(null);
 const activeBook = ref<Book | null>(null);
+const DEFAULT_GRID_SORT: { field: BorrowSortBy; order: BorrowSortOrder } = {
+  field: 'borrow_date',
+  order: 'desc',
+};
+const gridSortState = ref<{ field: BorrowSortBy; order: BorrowSortOrder }>({
+  ...DEFAULT_GRID_SORT,
+});
 
 const COVER_PLACEHOLDER_SRC = '/covers/cover-placeholder.svg';
 const coverLoadFailedIsbns = ref<Set<string>>(new Set());
@@ -175,6 +184,11 @@ const STATUS_OPTIONS: Array<{ label: string; value: BorrowStatus | 'all' }> = [
 
 const gridFormOptions: VbenFormProps = {
   collapsed: false,
+  handleReset: async () => {
+    await gridApi.formApi.resetForm();
+    resetGridSortToDefault();
+    await gridApi.reload();
+  },
   resetButtonOptions: { content: '重置' },
   schema: [
     {
@@ -223,12 +237,14 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
     {
       field: 'borrow_date',
       formatter: 'formatDateTime',
+      sortable: true,
       title: '借出时间',
       width: 180,
     },
     {
       field: 'due_date',
       formatter: 'formatDateTime',
+      sortable: true,
       title: '截止/应还时间',
       width: 180,
     },
@@ -260,11 +276,27 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
   pagerConfig: {},
   proxyConfig: {
     ajax: {
-      query: async ({ page }, formValues) => {
+      query: async ({ page, sort }, formValues) => {
         gridPager.value = {
           currentPage: page.currentPage,
           pageSize: page.pageSize,
         };
+        const nextSortField = sort?.field;
+        const nextSortOrder = sort?.order;
+        if (
+          (nextSortField === 'borrow_date' || nextSortField === 'due_date') &&
+          (nextSortOrder === 'asc' || nextSortOrder === 'desc')
+        ) {
+          gridSortState.value = {
+            field: nextSortField,
+            order: nextSortOrder,
+          };
+        } else if (
+          nextSortField === 'borrow_date' ||
+          nextSortField === 'due_date'
+        ) {
+          resetGridSortToDefault();
+        }
 
         const borrowRange = normalizeRange(formValues.borrow_date_range);
 
@@ -274,13 +306,23 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
           isbn: formValues.isbn,
           page: page.currentPage,
           pageSize: page.pageSize,
+          sortBy: gridSortState.value.field,
+          sortOrder: gridSortState.value.order,
           status: String(formValues.status ?? 'all') as BorrowStatus | 'all',
         });
       },
+      querySuccess: async () => {
+        await syncGridSortIndicator();
+      },
     },
+    sort: true,
   },
   rowConfig: {
     keyField: 'record_id',
+  },
+  sortConfig: {
+    defaultSort: { field: 'borrow_date', order: 'desc' },
+    remote: true,
   },
   toolbarConfig: {
     custom: true,
@@ -292,10 +334,42 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
   },
 };
 
+const gridEvents: VxeGridListeners<BorrowRecord> = {
+  sortChange: ({ field, order }) => {
+    if (field !== 'borrow_date' && field !== 'due_date') return;
+    if (order === 'asc' || order === 'desc') {
+      gridSortState.value = {
+        field,
+        order,
+      };
+      return;
+    }
+    resetGridSortToDefault();
+  },
+  toolbarToolClick: ({ code }) => {
+    if (code !== 'refresh') return;
+    resetGridSortToDefault();
+  },
+};
+
 const [Grid, gridApi] = useVbenVxeGrid({
+  gridEvents,
   formOptions: gridFormOptions,
   gridOptions,
 });
+
+function resetGridSortToDefault() {
+  gridSortState.value = { ...DEFAULT_GRID_SORT };
+}
+
+async function syncGridSortIndicator() {
+  const grid = gridApi.grid;
+  if (!grid) return;
+  await grid.sort({
+    field: gridSortState.value.field,
+    order: gridSortState.value.order,
+  });
+}
 
 function refresh() {
   gridApi.query();
@@ -355,7 +429,7 @@ async function onConfirmCancel() {
 
 <template>
   <Page auto-content-height title="借阅记录">
-    <CancelDrawer class="w-[560px]">
+    <CancelDrawer>
       <template #footer>
         <ElButton
           :disabled="!activeRecord || !canCancelActiveRecord() || !!cancelingRecordId"

@@ -37,6 +37,8 @@ export namespace BorrowsApi {
     pageSize?: number;
     returnEnd?: number;
     returnStart?: number;
+    sortBy?: 'borrow_date' | 'due_date';
+    sortOrder?: 'asc' | 'desc';
     status?: BorrowStatus | 'all';
     username?: string;
   }

@@ -28,7 +28,7 @@ export namespace BooksApi {
     isbn?: string;
     page?: number;
     pageSize?: number;
-    sortBy?: 'created_at';
+    sortBy?: 'created_at' | 'current_stock';
     sortOrder?: 'asc' | 'desc';
     status?: BookStatus;
     title?: string;

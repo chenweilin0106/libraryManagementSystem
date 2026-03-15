@@ -1,7 +1,7 @@
 import { requestClient } from '#/api/request';
 
 export namespace UsersApi {
-  export type UserRole = 'admin' | 'user';
+  export type UserRole = 'super' | 'admin' | 'user';
   export type UserStatus = 0 | 1;
 
   export interface User {
@@ -27,6 +27,8 @@ export namespace UsersApi {
     page?: number;
     pageSize?: number;
     role?: UserRole | 'all';
+    sortBy?: 'created_at' | 'role';
+    sortOrder?: 'asc' | 'desc';
     status?: UserStatus | 'all';
     username?: string;
   }

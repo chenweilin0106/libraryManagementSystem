@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import type { VbenFormProps } from '#/adapter/form';
-import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { VxeGridListeners, VxeGridProps } from '#/adapter/vxe-table';
 
 import { ref } from 'vue';
 
@@ -23,6 +23,8 @@ import { listBooksApi, reserveBorrowApi } from '#/api';
 defineOptions({ name: 'UserReservations' });
 
 type Book = BooksApi.Book;
+type BookSortBy = NonNullable<BooksApi.ListParams['sortBy']>;
+type BookSortOrder = NonNullable<BooksApi.ListParams['sortOrder']>;
 
 const CATEGORY_OPTIONS = [
   { label: '计算机', value: '计算机' },
@@ -35,6 +37,13 @@ const CATEGORY_OPTIONS = [
 const reservingIsbn = ref<string>('');
 const gridPager = ref({ currentPage: 1, pageSize: 20 });
 const activeBook = ref<Book | null>(null);
+const DEFAULT_GRID_SORT: { field: BookSortBy; order: BookSortOrder } = {
+  field: 'created_at',
+  order: 'desc',
+};
+const gridSortState = ref<{ field: BookSortBy; order: BookSortOrder }>({
+  ...DEFAULT_GRID_SORT,
+});
 
 const COVER_PLACEHOLDER_SRC = '/covers/cover-placeholder.svg';
 const coverLoadFailedIsbns = ref<Set<string>>(new Set());
@@ -84,6 +93,11 @@ const [Drawer, drawerApi] = useVbenDrawer({
 
 const gridFormOptions: VbenFormProps = {
   collapsed: false,
+  handleReset: async () => {
+    await gridApi.formApi.resetForm();
+    resetGridSortToDefault();
+    await gridApi.reload();
+  },
   resetButtonOptions: { content: '重置' },
   schema: [
     {
@@ -139,8 +153,16 @@ const gridOptions: VxeGridProps<Book> = {
     {
       field: 'current_stock',
       slots: { default: 'stock' },
+      sortable: true,
       title: '库存',
       width: 90,
+    },
+    {
+      field: 'created_at',
+      formatter: 'formatDateTime',
+      sortable: true,
+      title: '入库时间',
+      width: 180,
     },
     {
       field: 'actions',
@@ -165,27 +187,51 @@ const gridOptions: VxeGridProps<Book> = {
   pagerConfig: {},
   proxyConfig: {
     ajax: {
-      query: async ({ page }, formValues) => {
+      query: async ({ page, sort }, formValues) => {
         gridPager.value = {
           currentPage: page.currentPage,
           pageSize: page.pageSize,
         };
+        const nextSortField = sort?.field;
+        const nextSortOrder = sort?.order;
+        if (
+          (nextSortField === 'created_at' || nextSortField === 'current_stock') &&
+          (nextSortOrder === 'asc' || nextSortOrder === 'desc')
+        ) {
+          gridSortState.value = {
+            field: nextSortField,
+            order: nextSortOrder,
+          };
+        } else if (
+          nextSortField === 'created_at' ||
+          nextSortField === 'current_stock'
+        ) {
+          resetGridSortToDefault();
+        }
         return await listBooksApi({
           author: formValues.author,
           category: formValues.category,
           isbn: formValues.isbn,
           page: page.currentPage,
           pageSize: page.pageSize,
-          sortBy: 'created_at',
-          sortOrder: 'desc',
+          sortBy: gridSortState.value.field,
+          sortOrder: gridSortState.value.order,
           status: 'normal',
           title: formValues.title,
         });
       },
+      querySuccess: async () => {
+        await syncGridSortIndicator();
+      },
     },
+    sort: true,
   },
   rowConfig: {
     keyField: 'isbn',
+  },
+  sortConfig: {
+    defaultSort: { field: 'created_at', order: 'desc' },
+    remote: true,
   },
   showOverflow: true,
   toolbarConfig: {
@@ -198,10 +244,42 @@ const gridOptions: VxeGridProps<Book> = {
   },
 };
 
+const gridEvents: VxeGridListeners<Book> = {
+  sortChange: ({ field, order }) => {
+    if (field !== 'created_at' && field !== 'current_stock') return;
+    if (order === 'asc' || order === 'desc') {
+      gridSortState.value = {
+        field,
+        order,
+      };
+      return;
+    }
+    resetGridSortToDefault();
+  },
+  toolbarToolClick: ({ code }) => {
+    if (code !== 'refresh') return;
+    resetGridSortToDefault();
+  },
+};
+
 const [Grid, gridApi] = useVbenVxeGrid({
+  gridEvents,
   formOptions: gridFormOptions,
   gridOptions,
 });
+
+function resetGridSortToDefault() {
+  gridSortState.value = { ...DEFAULT_GRID_SORT };
+}
+
+async function syncGridSortIndicator() {
+  const grid = gridApi.grid;
+  if (!grid) return;
+  await grid.sort({
+    field: gridSortState.value.field,
+    order: gridSortState.value.order,
+  });
+}
 
 function refresh() {
   gridApi.query();
@@ -260,7 +338,7 @@ async function onConfirmReserve() {
 
 <template>
   <Page auto-content-height title="图书预定">
-    <Drawer class="w-[560px]">
+    <Drawer>
       <ElDescriptions v-if="activeBook" :column="1" border class="mt-2">
         <ElDescriptionsItem label="ISBN">
           {{ activeBook.isbn }}

@@ -24,7 +24,7 @@ const MOCK_USER_OPTIONS: BasicOption[] = [
   },
   {
     label: 'User',
-    value: 'jack',
+    value: 'reader1',
   },
 ];
 
@@ -42,7 +42,7 @@ const formSchema = computed((): VbenFormSchema[] => {
         .string()
         .min(1, { message: $t('authentication.selectAccount') })
         .optional()
-        .default('admin'),
+        .default('reader1'),
     },
     {
       component: 'VbenInput',

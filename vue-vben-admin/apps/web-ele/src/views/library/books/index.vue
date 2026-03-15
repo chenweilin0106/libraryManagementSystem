@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import type { VbenFormProps, VbenFormSchema } from '#/adapter/form';
-import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { VxeGridListeners, VxeGridProps } from '#/adapter/vxe-table';
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
@@ -43,6 +43,8 @@ type BookStatus = BooksApi.BookStatus;
 type Book = BooksApi.Book;
 type ImportConflictStrategy = BooksApi.ImportConflictStrategy;
 type ImportPreviewRow = BooksApi.ImportPreviewRow;
+type BookSortBy = NonNullable<BooksApi.ListParams['sortBy']>;
+type BookSortOrder = NonNullable<BooksApi.ListParams['sortOrder']>;
 
 const CATEGORY_OPTIONS = [
   { label: '计算机', value: '计算机' },
@@ -78,6 +80,13 @@ const rawObjectUrlMap = new WeakMap<File, string>();
 let activeCoverObjectUrls = new Set<string>();
 let retainedCoverObjectUrls = new Set<string>();
 const gridPager = ref({ currentPage: 1, pageSize: 20 });
+const DEFAULT_GRID_SORT: { field: BookSortBy; order: BookSortOrder } = {
+  field: 'created_at',
+  order: 'desc',
+};
+const gridSortState = ref<{ field: BookSortBy; order: BookSortOrder }>({
+  ...DEFAULT_GRID_SORT,
+});
 
 const [ImportPreviewModal, importPreviewModalApi] = useVbenModal({
   cancelText: '取消',
@@ -263,6 +272,11 @@ const [BookForm, bookFormApi] = useVbenForm({
 
 const gridFormOptions: VbenFormProps = {
   collapsed: false,
+  handleReset: async () => {
+    await gridApi.formApi.resetForm();
+    resetGridSortToDefault();
+    await gridApi.reload();
+  },
   resetButtonOptions: { content: '重置' },
   schema: [
     {
@@ -505,7 +519,7 @@ const gridOptions: VxeGridProps<Book> = {
       width: 140,
     },
     { field: 'total_stock', title: '总库存', width: 90 },
-    { field: 'current_stock', title: '当前可借', width: 90 },
+    { field: 'current_stock', sortable: true, title: '当前可借', width: 90 },
     {
       field: 'is_deleted',
       slots: { default: 'status' },
@@ -515,6 +529,7 @@ const gridOptions: VxeGridProps<Book> = {
     {
       field: 'created_at',
       formatter: 'formatDateTime',
+      sortable: true,
       title: '入库时间',
       width: 180,
     },
@@ -541,28 +556,52 @@ const gridOptions: VxeGridProps<Book> = {
   pagerConfig: {},
   proxyConfig: {
     ajax: {
-      query: async ({ page }, formValues) => {
+      query: async ({ page, sort }, formValues) => {
         gridPager.value = {
           currentPage: page.currentPage,
           pageSize: page.pageSize,
         };
+        const nextSortField = sort?.field;
+        const nextSortOrder = sort?.order;
+        if (
+          (nextSortField === 'created_at' || nextSortField === 'current_stock') &&
+          (nextSortOrder === 'asc' || nextSortOrder === 'desc')
+        ) {
+          gridSortState.value = {
+            field: nextSortField,
+            order: nextSortOrder,
+          };
+        } else if (
+          nextSortField === 'created_at' ||
+          nextSortField === 'current_stock'
+        ) {
+          resetGridSortToDefault();
+        }
         const result = await listBooksApi({
           author: formValues.author,
           category: formValues.category,
           isbn: formValues.isbn,
           page: page.currentPage,
           pageSize: page.pageSize,
-          sortBy: 'created_at',
-          sortOrder: 'desc',
+          sortBy: gridSortState.value.field,
+          sortOrder: gridSortState.value.order,
           status: (formValues.status ?? 'all') as BookStatus,
           title: formValues.title,
         });
         return result;
       },
+      querySuccess: async () => {
+        await syncGridSortIndicator();
+      },
     },
+    sort: true,
   },
   rowConfig: {
     keyField: 'isbn',
+  },
+  sortConfig: {
+    defaultSort: { field: 'created_at', order: 'desc' },
+    remote: true,
   },
   toolbarConfig: {
     custom: true,
@@ -574,8 +613,27 @@ const gridOptions: VxeGridProps<Book> = {
   },
 };
 
+const gridEvents: VxeGridListeners<Book> = {
+  sortChange: ({ field, order }) => {
+    if (field !== 'created_at' && field !== 'current_stock') return;
+    if (order === 'asc' || order === 'desc') {
+      gridSortState.value = {
+        field,
+        order,
+      };
+      return;
+    }
+    resetGridSortToDefault();
+  },
+  toolbarToolClick: ({ code }) => {
+    if (code !== 'refresh') return;
+    resetGridSortToDefault();
+  },
+};
+
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: gridFormOptions,
+  gridEvents,
   gridOptions,
 });
 
@@ -655,6 +713,21 @@ const [Drawer, drawerApi] = useVbenDrawer({
 watch(drawerConfirmText, (text) => {
   drawerApi.setState({ confirmText: text });
 });
+
+function resetGridSortToDefault() {
+  gridSortState.value = { ...DEFAULT_GRID_SORT };
+}
+
+async function syncGridSortIndicator() {
+  const grid = gridApi.grid;
+  if (!grid) return;
+  await nextTick();
+  await grid.sort({
+    field: gridSortState.value.field,
+    order: gridSortState.value.order,
+  });
+}
+
 
 function refresh() {
   gridApi.query();
@@ -870,7 +943,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Page auto-content-height>
-    <Drawer :title="drawerTitle" class="w-[720px]">
+    <Drawer :title="drawerTitle">
       <template v-if="drawerMode === 'create'">
         <ElTabs v-model="drawerActiveTab" class="mt-2">
           <ElTabPane label="手动录入" name="manual">

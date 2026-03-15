@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import type { VbenFormProps, VbenFormSchema } from '#/adapter/form';
-import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { VxeGridListeners, VxeGridProps } from '#/adapter/vxe-table';
 
 import { computed, h, nextTick, ref } from 'vue';
 
@@ -29,8 +29,17 @@ defineOptions({ name: 'Borrows' });
 
 type BorrowStatus = BorrowsApi.BorrowStatus;
 type BorrowRecord = BorrowsApi.BorrowRecord;
+type BorrowSortBy = NonNullable<BorrowsApi.ListParams['sortBy']>;
+type BorrowSortOrder = NonNullable<BorrowsApi.ListParams['sortOrder']>;
 
 const gridPager = ref({ currentPage: 1, pageSize: 20 });
+const DEFAULT_GRID_SORT: { field: BorrowSortBy; order: BorrowSortOrder } = {
+  field: 'borrow_date',
+  order: 'desc',
+};
+const gridSortState = ref<{ field: BorrowSortBy; order: BorrowSortOrder }>({
+  ...DEFAULT_GRID_SORT,
+});
 
 function pad2(num: number) {
   return String(num).padStart(2, '0');
@@ -103,6 +112,38 @@ function canReturn(record: BorrowRecord) {
   return status === 'borrowed' || status === 'overdue' || status === 'reserved';
 }
 
+function resetGridSortToDefault() {
+  gridSortState.value = { ...DEFAULT_GRID_SORT };
+}
+
+async function syncGridSortIndicator() {
+  const grid = gridApi.grid;
+  if (!grid) return;
+  await nextTick();
+  await grid.sort({
+    field: gridSortState.value.field,
+    order: gridSortState.value.order,
+  });
+}
+
+const gridEvents: VxeGridListeners<BorrowRecord> = {
+  sortChange: ({ field, order }) => {
+    if (field !== 'borrow_date' && field !== 'due_date') return;
+    if (order === 'asc' || order === 'desc') {
+      gridSortState.value = {
+        field,
+        order,
+      };
+      return;
+    }
+    resetGridSortToDefault();
+  },
+  toolbarToolClick: ({ code }) => {
+    if (code !== 'refresh') return;
+    resetGridSortToDefault();
+  },
+};
+
 const STATUS_OPTIONS: Array<{ label: string; value: BorrowStatus | 'all' }> = [
   { label: '全部', value: 'all' },
   { label: '借阅中', value: 'borrowed' },
@@ -114,6 +155,11 @@ const STATUS_OPTIONS: Array<{ label: string; value: BorrowStatus | 'all' }> = [
 
 const gridFormOptions: VbenFormProps = {
   collapsed: false,
+  handleReset: async () => {
+    await gridApi.formApi.resetForm();
+    resetGridSortToDefault();
+    await gridApi.reload();
+  },
   resetButtonOptions: { content: '重置' },
   schema: [
     {
@@ -186,12 +232,14 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
     {
       field: 'borrow_date',
       formatter: 'formatDateTime',
+      sortable: true,
       title: '借出时间',
       width: 180,
     },
     {
       field: 'due_date',
       formatter: 'formatDateTime',
+      sortable: true,
       title: '应还时间',
       width: 180,
     },
@@ -222,11 +270,28 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
   pagerConfig: {},
   proxyConfig: {
     ajax: {
-      query: async ({ page }, formValues) => {
+      query: async ({ page, sort }, formValues) => {
         gridPager.value = {
           currentPage: page.currentPage,
           pageSize: page.pageSize,
         };
+
+        const nextSortField = sort?.field;
+        const nextSortOrder = sort?.order;
+        if (
+          (nextSortField === 'borrow_date' || nextSortField === 'due_date') &&
+          (nextSortOrder === 'asc' || nextSortOrder === 'desc')
+        ) {
+          gridSortState.value = {
+            field: nextSortField,
+            order: nextSortOrder,
+          };
+        } else if (
+          nextSortField === 'borrow_date' ||
+          nextSortField === 'due_date'
+        ) {
+          resetGridSortToDefault();
+        }
 
         const borrowRange = normalizeRange(formValues.borrow_date_range);
         const returnRange = normalizeRange(formValues.return_date_range);
@@ -239,14 +304,24 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
           pageSize: page.pageSize,
           returnEnd: returnRange?.[1],
           returnStart: returnRange?.[0],
+          sortBy: gridSortState.value.field,
+          sortOrder: gridSortState.value.order,
           status: String(formValues.status ?? 'all') as BorrowStatus | 'all',
           username: formValues.username,
         });
       },
+      querySuccess: async () => {
+        await syncGridSortIndicator();
+      },
     },
+    sort: true,
   },
   rowConfig: {
     keyField: 'record_id',
+  },
+  sortConfig: {
+    defaultSort: { field: 'borrow_date', order: 'desc' },
+    remote: true,
   },
   toolbarConfig: {
     custom: true,
@@ -260,6 +335,7 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: gridFormOptions,
+  gridEvents,
   gridOptions,
 });
 
@@ -641,7 +717,7 @@ function statusLabel(status: BorrowStatus) {
 
 <template>
   <Page auto-content-height>
-    <Drawer class="w-[760px]">
+    <Drawer>
       <template #default>
         <div class="space-y-4">
           <div v-if="drawerMode === 'borrow'">

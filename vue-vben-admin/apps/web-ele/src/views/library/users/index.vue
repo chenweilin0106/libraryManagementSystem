@@ -1,11 +1,12 @@
 <script lang="ts" setup>
 import type { VbenFormProps, VbenFormSchema } from '#/adapter/form';
-import type { VxeGridProps } from '#/adapter/vxe-table';
+import type { VxeGridListeners, VxeGridProps } from '#/adapter/vxe-table';
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
 
@@ -15,7 +16,6 @@ import {
   ElImage,
   ElMessage,
   ElMessageBox,
-  ElSwitch,
   ElTabPane,
   ElTabs,
   ElTag,
@@ -41,17 +41,31 @@ type UserRole = UsersApi.UserRole;
 type UserStatus = UsersApi.UserStatus;
 type User = UsersApi.User;
 type ImportPreviewRow = UsersApi.ImportPreviewRow;
+type CurrentRole = UserRole;
+type UserSortBy = NonNullable<UsersApi.ListParams['sortBy']>;
+type UserSortOrder = NonNullable<UsersApi.ListParams['sortOrder']>;
 
 const DEFAULT_PASSWORD = '123456';
 const AVATAR_PLACEHOLDER_SRC = '/avatars/avatar-placeholder.svg';
 const PROTECTED_USERNAMES = new Set(['admin', 'vben']);
 const gridPager = ref({ currentPage: 1, pageSize: 20 });
+const userStore = useUserStore();
 
-const ROLE_OPTIONS: Array<{ label: string; value: UserRole | 'all' }> = [
+const ROLE_FILTER_OPTIONS: Array<{ label: string; value: UserRole | 'all' }> = [
   { label: '全部', value: 'all' },
+  { label: '超级管理员', value: 'super' },
   { label: '管理员', value: 'admin' },
   { label: '读者', value: 'user' },
 ];
+
+const ROLE_EDIT_OPTIONS: Record<CurrentRole, Array<{ label: string; value: UserRole }>> = {
+  admin: [{ label: '读者', value: 'user' }],
+  super: [
+    { label: '管理员', value: 'admin' },
+    { label: '读者', value: 'user' },
+  ],
+  user: [],
+};
 
 const STATUS_OPTIONS: Array<{ label: string; value: UserStatus | 'all' }> = [
   { label: '全部', value: 'all' },
@@ -66,6 +80,13 @@ const avatarLoadFailedIds = ref<Set<string>>(new Set());
 const importPreviewLoading = ref(false);
 const importCommitLoading = ref(false);
 const importPreviewData = ref<UsersApi.ImportPreviewResponseData | null>(null);
+const DEFAULT_GRID_SORT: { field: UserSortBy; order: UserSortOrder } = {
+  field: 'created_at',
+  order: 'desc',
+};
+const gridSortState = ref<{ field: UserSortBy; order: UserSortOrder }>({
+  ...DEFAULT_GRID_SORT,
+});
 
 // vben-form 托管 Upload 的 fileList，这里管理 object url，避免替换/关闭抽屉后内存泄漏
 const managedObjectUrls = new Set<string>();
@@ -229,6 +250,43 @@ function normalizeText(input: unknown) {
   return String(input ?? '').trim().toLowerCase();
 }
 
+function normalizeCurrentRole(input: unknown): CurrentRole {
+  const role = String(input ?? '').trim();
+  if (role === 'super' || role === 'admin' || role === 'user') {
+    return role;
+  }
+  return 'user';
+}
+
+function roleTagLabel(role: UserRole) {
+  if (role === 'super') return 'super';
+  if (role === 'admin') return 'admin';
+  return 'reader';
+}
+
+function roleTagType(role: UserRole) {
+  if (role === 'super') return 'danger';
+  if (role === 'admin') return 'warning';
+  return 'info';
+}
+
+const currentRole = computed(() => normalizeCurrentRole(userStore.userInfo?.roles?.[0]));
+const editableRoleOptions = computed(() => ROLE_EDIT_OPTIONS[currentRole.value]);
+
+function canManageUser(row: Pick<User, 'role'>) {
+  if (currentRole.value === 'super') {
+    return row.role === 'admin' || row.role === 'user';
+  }
+  if (currentRole.value === 'admin') {
+    return row.role === 'user';
+  }
+  return false;
+}
+
+function canAssignRoleByCurrentUser(role: UserRole) {
+  return editableRoleOptions.value.some((item) => item.value === role);
+}
+
 function toMs(value: unknown) {
   if (!value) return null;
   if (value instanceof Date) return value.getTime();
@@ -273,6 +331,11 @@ function normalizeRange(range: unknown) {
 
 const gridFormOptions: VbenFormProps = {
   collapsed: false,
+  handleReset: async () => {
+    await gridApi.formApi.resetForm();
+    resetGridSortToDefault();
+    await gridApi.reload();
+  },
   resetButtonOptions: { content: '重置' },
   schema: [
     {
@@ -285,7 +348,7 @@ const gridFormOptions: VbenFormProps = {
       component: 'Select',
       componentProps: {
         clearable: false,
-        options: ROLE_OPTIONS,
+        options: ROLE_FILTER_OPTIONS,
         placeholder: '请选择角色',
       },
       defaultValue: 'all',
@@ -322,10 +385,6 @@ const gridFormOptions: VbenFormProps = {
   submitOnEnter: true,
 };
 
-function roleLabel(role: UserRole) {
-  return role === 'admin' ? '管理员' : '读者';
-}
-
 function statusLabel(status: UserStatus) {
   return status === 1 ? '正常' : '冻结';
 }
@@ -333,6 +392,38 @@ function statusLabel(status: UserStatus) {
 function statusTagType(status: UserStatus) {
   return status === 1 ? 'success' : 'danger';
 }
+
+function resetGridSortToDefault() {
+  gridSortState.value = { ...DEFAULT_GRID_SORT };
+}
+
+async function syncGridSortIndicator() {
+  const grid = gridApi.grid;
+  if (!grid) return;
+  await nextTick();
+  await grid.sort({
+    field: gridSortState.value.field,
+    order: gridSortState.value.order,
+  });
+}
+
+const gridEvents: VxeGridListeners<User> = {
+  sortChange: ({ field, order }) => {
+    if (field !== 'created_at' && field !== 'role') return;
+    if (order === 'asc' || order === 'desc') {
+      gridSortState.value = {
+        field,
+        order,
+      };
+      return;
+    }
+    resetGridSortToDefault();
+  },
+  toolbarToolClick: ({ code }) => {
+    if (code !== 'refresh') return;
+    resetGridSortToDefault();
+  },
+};
 
 const gridOptions: VxeGridProps<User> = {
   columns: [
@@ -348,6 +439,7 @@ const gridOptions: VxeGridProps<User> = {
     {
       field: 'role',
       slots: { default: 'role' },
+      sortable: true,
       title: '角色',
       width: 100,
     },
@@ -361,6 +453,7 @@ const gridOptions: VxeGridProps<User> = {
     {
       field: 'created_at',
       formatter: 'formatDateTime',
+      sortable: true,
       title: '注册时间',
       width: 180,
     },
@@ -384,11 +477,28 @@ const gridOptions: VxeGridProps<User> = {
   pagerConfig: {},
   proxyConfig: {
     ajax: {
-      query: async ({ page }, formValues) => {
+      query: async ({ page, sort }, formValues) => {
         gridPager.value = {
           currentPage: page.currentPage,
           pageSize: page.pageSize,
         };
+
+        const nextSortField = sort?.field;
+        const nextSortOrder = sort?.order;
+        if (
+          (nextSortField === 'created_at' || nextSortField === 'role') &&
+          (nextSortOrder === 'asc' || nextSortOrder === 'desc')
+        ) {
+          gridSortState.value = {
+            field: nextSortField,
+            order: nextSortOrder,
+          };
+        } else if (
+          nextSortField === 'created_at' ||
+          nextSortField === 'role'
+        ) {
+          resetGridSortToDefault();
+        }
 
         const createdRange = normalizeRange(formValues.created_at_range);
         return listUsersApi({
@@ -397,14 +507,24 @@ const gridOptions: VxeGridProps<User> = {
           page: page.currentPage,
           pageSize: page.pageSize,
           role: String(formValues.role ?? 'all') as UserRole | 'all',
+          sortBy: gridSortState.value.field,
+          sortOrder: gridSortState.value.order,
           status: (formValues.status ?? 'all') as UserStatus | 'all',
           username: formValues.username,
         });
       },
+      querySuccess: async () => {
+        await syncGridSortIndicator();
+      },
     },
+    sort: true,
   },
   rowConfig: {
     keyField: '_id',
+  },
+  sortConfig: {
+    defaultSort: { field: 'created_at', order: 'desc' },
+    remote: true,
   },
   toolbarConfig: {
     custom: true,
@@ -418,6 +538,7 @@ const gridOptions: VxeGridProps<User> = {
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: gridFormOptions,
+  gridEvents,
   gridOptions,
 });
 
@@ -483,7 +604,6 @@ const drawerConfirmText = computed(() => {
 });
 
 const editingOriginalId = ref<string | null>(null);
-const editingStatus = ref<UserStatus>(1);
 const editingProtected = ref(false);
 const editingOriginalAvatarUrl = ref<string>('');
 
@@ -511,13 +631,29 @@ const userFormSchema: VbenFormSchema[] = [
     component: 'Select',
     componentProps: () => ({
       clearable: false,
-      disabled: drawerMode.value === 'edit' && editingProtected.value,
-      options: ROLE_OPTIONS.filter((o) => o.value !== 'all'),
+      disabled:
+        currentRole.value !== 'super' ||
+        (drawerMode.value === 'edit' && editingProtected.value),
+      options: editableRoleOptions.value,
       placeholder: '请选择角色',
     }),
     fieldName: 'role',
     label: '角色',
     rules: 'selectRequired',
+  },
+  {
+    component: 'Switch',
+    componentProps: () => ({
+      activeText: '正常',
+      activeValue: 1,
+      disabled: drawerMode.value === 'edit' && editingProtected.value,
+      inactiveText: '冻结',
+      inactiveValue: 0,
+      inlinePrompt: true,
+    }),
+    defaultValue: 1,
+    fieldName: 'status',
+    label: '账号状态',
   },
   {
     component: 'Upload',
@@ -581,7 +717,6 @@ function onCreate() {
   drawerMode.value = 'create';
   drawerActiveTab.value = 'manual';
   editingOriginalId.value = null;
-  editingStatus.value = 1;
   editingProtected.value = false;
   editingOriginalAvatarUrl.value = '';
   uploadExcelFileList.value = [];
@@ -595,6 +730,7 @@ function onCreate() {
         credit_score: 100,
         phone: '',
         role: 'user',
+        status: 1,
         username: '',
       },
       true,
@@ -604,10 +740,13 @@ function onCreate() {
 }
 
 function onEdit(row: User) {
+  if (!canManageUser(row)) {
+    ElMessage.warning('当前角色不能编辑该用户');
+    return;
+  }
   drawerMode.value = 'edit';
   drawerActiveTab.value = 'manual';
   editingOriginalId.value = row._id;
-  editingStatus.value = row.status;
   editingProtected.value = isProtectedUser(row);
   editingOriginalAvatarUrl.value = row.avatar || '';
   drawerApi.setState({ confirmText: drawerConfirmText.value });
@@ -626,6 +765,7 @@ function onEdit(row: User) {
         credit_score: row.credit_score ?? 100,
         phone: row.phone ?? '',
         role: row.role,
+        status: row.status,
         username: row.username,
       },
       true,
@@ -673,7 +813,7 @@ async function onDrawerConfirm() {
   }
 
   const values = (await userFormApi.validateAndSubmitForm()) as
-    | (Pick<User, 'credit_score' | 'role' | 'username' | 'phone'> & {
+    | (Pick<User, 'credit_score' | 'role' | 'status' | 'username' | 'phone'> & {
         avatar_files?: UploadFile[];
       })
     | undefined;
@@ -684,6 +824,7 @@ async function onDrawerConfirm() {
   if (!username) return;
 
   const role = (values.role ?? 'user') as UserRole;
+  const status = (values.status ?? 1) as UserStatus;
   const creditScore = Number(values.credit_score ?? 100);
   const phone = String((values as any).phone ?? '').trim();
   const avatarFiles = (values as any).avatar_files as UploadFile[] | undefined;
@@ -694,13 +835,17 @@ async function onDrawerConfirm() {
     ElMessage.error('信用积分必须是非负数');
     return;
   }
+  if (!canAssignRoleByCurrentUser(role)) {
+    ElMessage.error('当前角色不能设置该角色');
+    return;
+  }
 
   const payload: UsersApi.UpsertBody = {
     avatar: avatarUrl,
     credit_score: creditScore,
     phone,
     role,
-    status: editingStatus.value,
+    status,
     username,
   };
 
@@ -730,6 +875,10 @@ async function onDrawerConfirm() {
 }
 
 async function onResetPassword(row: User) {
+  if (!canManageUser(row)) {
+    ElMessage.warning('当前角色不能重置该用户密码');
+    return;
+  }
   if (isProtectedUser(row)) {
     ElMessage.warning('内置账号禁止重置密码');
     return;
@@ -756,6 +905,10 @@ async function onResetPassword(row: User) {
 }
 
 async function onDelete(row: User) {
+  if (!canManageUser(row)) {
+    ElMessage.warning('当前角色不能删除该用户');
+    return;
+  }
   if (isProtectedUser(row)) {
     ElMessage.warning('内置账号禁止删除');
     return;
@@ -833,70 +986,74 @@ onBeforeUnmount(() => {
 
 <template>
   <Page auto-content-height>
-    <Drawer :title="drawerTitle" class="w-[560px]">
-      <ElTabs v-model="drawerActiveTab" class="mt-2">
-        <ElTabPane label="手动录入" name="manual">
-          <div class="px-4 pb-4 pt-2">
-            <div class="mb-3 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-              新增用户初始密码为 {{ DEFAULT_PASSWORD }}，密码字段不在前端直接编辑。
-            </div>
-
-            <div class="mb-4 flex items-center justify-between rounded-md border border-dashed px-3 py-2">
-              <div class="text-sm">
-                <div class="font-medium">账号状态</div>
-                <div class="text-muted-foreground mt-1 text-xs">
-                  冻结后可用于拦截登录与接口访问（后端联调时生效）。
-                </div>
+    <Drawer :title="drawerTitle">
+      <template v-if="drawerMode === 'create'">
+        <ElTabs v-model="drawerActiveTab" class="mt-2">
+          <ElTabPane label="手动录入" name="manual">
+            <div class="px-4 pb-4 pt-2">
+              <div class="mb-3 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+                新增用户初始密码为 {{ DEFAULT_PASSWORD }}，密码字段不在前端直接编辑。
               </div>
-              <ElSwitch
-                v-model="editingStatus"
-                :active-value="1"
-                :inactive-value="0"
-                active-text="正常"
-                inactive-text="冻结"
-                :disabled="drawerMode === 'edit' && editingProtected"
-                inline-prompt
-              />
-            </div>
 
-            <UserForm>
-              <template #avatar_files="slotProps">
-                <ElUpload
-                  v-bind="slotProps"
-                  :auto-upload="false"
-                  :limit="1"
-                  accept="image/*"
-                  list-type="picture-card"
-                  @change="onAvatarUploadChange"
-                  @exceed="onAvatarExceed"
-                  @preview="onAvatarUploadPreview"
-                >
-                  <ElButton type="primary">选择头像</ElButton>
-                </ElUpload>
-              </template>
-            </UserForm>
-          </div>
-        </ElTabPane>
-        <ElTabPane v-if="drawerMode === 'create'" label="导入 Excel" name="import">
-          <div class="space-y-3 px-4 pb-4 pt-2">
-            <div class="text-muted-foreground text-sm">
-              选择文件后点击右下角“上传”，系统会先进行导入预览，确认后再写入数据库。
+              <UserForm>
+                <template #avatar_files="slotProps">
+                  <ElUpload
+                    v-bind="slotProps"
+                    :auto-upload="false"
+                    :limit="1"
+                    accept="image/*"
+                    list-type="picture-card"
+                    @change="onAvatarUploadChange"
+                    @exceed="onAvatarExceed"
+                    @preview="onAvatarUploadPreview"
+                  >
+                    <ElButton type="primary">选择头像</ElButton>
+                  </ElUpload>
+                </template>
+              </UserForm>
             </div>
-            <ElUpload
-              :auto-upload="false"
-              :file-list="uploadExcelFileList"
-              :limit="1"
-              accept=".xlsx,.xls"
-              @change="onExcelUploadChange"
-            >
-              <ElButton type="primary">选择 Excel 文件</ElButton>
-            </ElUpload>
-            <div class="text-muted-foreground text-sm">
-              提示：选择文件后，点击右下角“{{ drawerConfirmText }}”继续。
+          </ElTabPane>
+          <ElTabPane label="导入 Excel" name="import">
+            <div class="space-y-3 px-4 pb-4 pt-2">
+              <div class="text-muted-foreground text-sm">
+                选择文件后点击右下角“上传”，系统会先进行导入预览，确认后再写入数据库。
+              </div>
+              <ElUpload
+                :auto-upload="false"
+                :file-list="uploadExcelFileList"
+                :limit="1"
+                accept=".xlsx,.xls"
+                @change="onExcelUploadChange"
+              >
+                <ElButton type="primary">选择 Excel 文件</ElButton>
+              </ElUpload>
+              <div class="text-muted-foreground text-sm">
+                提示：选择文件后，点击右下角“{{ drawerConfirmText }}”继续。
+              </div>
             </div>
-          </div>
-        </ElTabPane>
-      </ElTabs>
+          </ElTabPane>
+        </ElTabs>
+      </template>
+      <template v-else>
+        <div class="px-4 pb-4 pt-4">
+          <UserForm>
+            <template #avatar_files="slotProps">
+              <ElUpload
+                v-bind="slotProps"
+                :auto-upload="false"
+                :limit="1"
+                accept="image/*"
+                list-type="picture-card"
+                @change="onAvatarUploadChange"
+                @exceed="onAvatarExceed"
+                @preview="onAvatarUploadPreview"
+              >
+                <ElButton type="primary">选择头像</ElButton>
+              </ElUpload>
+            </template>
+          </UserForm>
+        </div>
+      </template>
     </Drawer>
 
     <ImportPreviewModal>
@@ -969,8 +1126,8 @@ onBeforeUnmount(() => {
       </template>
 
       <template #role="{ row }">
-        <ElTag :type="row.role === 'admin' ? 'warning' : 'info'">
-          {{ roleLabel(row.role) }}
+        <ElTag :type="roleTagType(row.role)">
+          {{ roleTagLabel(row.role) }}
         </ElTag>
       </template>
 
@@ -982,9 +1139,11 @@ onBeforeUnmount(() => {
 
       <template #actions="{ row }">
         <div class="flex items-center justify-center gap-2">
-          <ElButton link type="primary" @click="onEdit(row)">编辑</ElButton>
+          <ElButton :disabled="!canManageUser(row)" link type="primary" @click="onEdit(row)">
+            编辑
+          </ElButton>
           <ElButton
-            :disabled="isProtectedUser(row)"
+            :disabled="!canManageUser(row) || isProtectedUser(row)"
             link
             type="warning"
             @click="onResetPassword(row)"
@@ -992,7 +1151,7 @@ onBeforeUnmount(() => {
             重置密码
           </ElButton>
           <ElButton
-            :disabled="isProtectedUser(row)"
+            :disabled="!canManageUser(row) || isProtectedUser(row)"
             link
             type="danger"
             @click="onDelete(row)"
