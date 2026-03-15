@@ -94,6 +94,23 @@
 ### 目标
 - 提交可审阅、可回滚、可定位问题：尽量“小步提交”，按功能/层次拆分。
 
+### 分支约定
+- 默认不要直接在 `main` 上开发功能；新需求、新修复、新的文档整理优先新建分支。
+- 尽可能保持“一个功能一个分支”，不要在同一分支里混做多个独立需求。
+- 功能配套文档跟随对应功能分支，不额外混入别的功能。
+- 纯文档或规范整理单独使用 `docs/*` 分支，不要穿插到功能分支里。
+- 功能合并完成后，及时删除已合并的旧分支，避免后续继续在旧分支上叠加新需求。
+
+### 分支命名
+- 新功能：`feat/<short-name>`
+- 缺陷修复：`fix/<short-name>`
+- 文档整理：`docs/<short-name>`
+- 重构调整：`refactor/<short-name>`
+- 命名保持简短，使用英文小写和中划线，例如：
+  - `feat/profile-menu-bottom`
+  - `fix/user-sort-reset`
+  - `docs/git-workflow-rules`
+
 ### 拆分原则
 - **不要合一笔提交**：后端/前端/文档尽量分开；同一层内也按“一个改动点一笔提交”拆。
 - 每笔提交尽量能独立说明问题与改动（避免“顺手改了很多小东西”混进同一笔）。
@@ -104,6 +121,11 @@
   - `type`：`feat`/`fix`/`refactor`/`chore`/`docs` 等
   - `scope`：`backend`/`frontend`/`docs`/具体模块名
   - `summary`：一句话说明做了什么
+- 参考示例：
+  - `feat(backend): add list sorting options`
+  - `feat(frontend): move profile menu to bottom`
+  - `docs(records): add page development notes`
+  - `chore(git): stop tracking idea workspace file`
 
 ### 不要提交的内容
 - 本地 IDE/个人环境文件（例如 `.idea/workspace.xml` 这类变动）默认不提交，除非团队明确需要共享。
