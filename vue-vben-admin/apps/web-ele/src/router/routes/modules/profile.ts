@@ -9,7 +9,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('#/views/_core/profile/index.vue'),
     meta: {
       icon: 'lucide:user',
-      order: 0,
+      order: 999,
       title: $t('page.auth.profile'),
     },
   },
