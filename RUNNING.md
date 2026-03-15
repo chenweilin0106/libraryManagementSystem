@@ -40,6 +40,59 @@ pnpm -C vue-vben-admin dev:ele
 
 - 访问地址：`http://localhost:5777`
 
+## 4) （可选）启动 Redis（Docker Desktop / WSL2 后端）
+
+用途：为后端的缓存/性能优化做准备；未接入前不影响现有功能。
+
+在项目根目录执行：
+
+```bash
+# 启动（后台）
+"C:\Program Files\Docker\Docker\resources\bin\docker.exe" compose -f docker/redis/compose.yml up -d
+
+# 自检（期望输出：PONG）
+"C:\Program Files\Docker\Docker\resources\bin\docker.exe" exec lms-redis redis-cli ping
+
+# 停止（保留数据卷）
+"C:\Program Files\Docker\Docker\resources\bin\docker.exe" compose -f docker/redis/compose.yml down
+
+# 停止并清理数据卷（谨慎）
+"C:\Program Files\Docker\Docker\resources\bin\docker.exe" compose -f docker/redis/compose.yml down -v
+```
+
+### 4.1 （可选）后端启用 Redis 缓存
+
+默认关闭；需要时在 `backend/.env`（如不存在可新建）里显式开启：
+
+```bash
+REDIS_ENABLED=1
+REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_KEY_PREFIX=lms:
+REDIS_DEFAULT_TTL_SECONDS=30
+```
+
+说明：
+- Redis 不可用/连接失败会自动降级为“不走缓存”，不影响接口正确性。
+- 已缓存的接口：`/api/books`、`/api/books/:isbn`、`/api/analytics/overview`、`/api/users`、`/api/borrows`、`/api/borrows/my`。
+
+### 4.2 （可选）热门图书榜单（论文：`rank:hot_books`）
+
+- 借阅成功时会递增榜单计数（ZSET）。
+- 管理员接口：`GET /api/analytics/hot-books?limit=10`
+
+### 4.3 （可选）Redis 限流（论文：`limit:req:{ip}`）
+
+默认关闭；需要时在 `backend/.env` 开启（建议只保护较重接口，如 analytics）：
+
+```bash
+RATE_LIMIT_ENABLED=1
+RATE_LIMIT_WINDOW_SECONDS=60
+RATE_LIMIT_MAX_REQUESTS=60
+```
+
+说明：
+- 当前已对 `GET /api/analytics/overview`、`GET /api/analytics/hot-books` 接入限流；超限返回 HTTP `429`。
+
 ## 常见问题
 
 - 后端连不上 MongoDB：先确认 MongoDB 服务已启动；如需修改连接串/库名，可查看 `backend/.env`（如存在）或按 `backend/` 内配置说明调整。

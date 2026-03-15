@@ -18,6 +18,7 @@
   - `/user-reservations`（图书预定）
   - `/user-borrow-records`（借阅记录）
   - `/user-center`（个人中心）
+- 重要：管理员端默认**不展示**用户端 3 个路由菜单。如需管理员联调用户端页面，请显式设置前端环境变量 `VITE_ENABLE_ADMIN_USER_PAGES=true` 并重启前端（默认保持关闭，避免出现多余菜单）。
 - 业务页面目录：`vue-vben-admin/apps/web-ele/src/views/library/*`
 - 业务路由模块：`vue-vben-admin/apps/web-ele/src/router/routes/modules/library.ts`
 
@@ -27,7 +28,15 @@
 
 ## 本地运行文档/脚本
 - 运行指南：`RUNNING.md`
-- 一键启动（Windows Terminal 多 Tab：数据库/后端/前端/codex）：`start-dev.ps1`
+- 一键启动（Windows Terminal 多 Tab：数据库/Redis/后端/前端/codex）：`start-dev.ps1`
+  - Redis：若检测 Docker 引擎不可用，会尝试拉起 Docker Desktop 并等待就绪（最多 120s），再启动容器。
+  - codex：tab 入口为 `pwsh`（外观与其它 tab 一致），随后进入 WSL 启动 `codex`；`codex` 退出后保留 WSL shell（退出 WSL 后回到 PowerShell）。
+
+## Redis（缓存/榜单/限流）
+- Redis（Docker）启动：见 `RUNNING.md` 的“4)（可选）启动 Redis”
+- 后端启用 Redis 缓存：在 `backend/.env` 配置 `REDIS_ENABLED=1`（默认关闭）
+- 热门图书榜单（论文 `rank:hot_books`）：管理员接口 `GET /api/analytics/hot-books`
+- Redis 限流（论文 `limit:req:{ip}`）：在 `backend/.env` 配置 `RATE_LIMIT_ENABLED=1`（默认关闭），超限返回 `429`
 
 ### 后端（backend）
 - 运行前提：本地 MongoDB 需要可连接（默认 `mongodb://127.0.0.1:27017`，数据库名 `library`；可用 `backend/.env` 覆盖）
