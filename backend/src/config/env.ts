@@ -25,4 +25,13 @@ export const env = {
   refreshTokenTtlSeconds: readIntEnv('REFRESH_TOKEN_TTL_SECONDS', 7 * 24 * 60 * 60),
   refreshTokenCookieName: readEnv('REFRESH_TOKEN_COOKIE_NAME', 'refreshToken'),
   seedDemoData: readEnv('SEED_DEMO_DATA', '1') === '1',
+
+  redisEnabled: readEnv('REDIS_ENABLED', '0') === '1',
+  redisUrl: readEnv('REDIS_URL', 'redis://127.0.0.1:6379/0'),
+  redisKeyPrefix: readEnv('REDIS_KEY_PREFIX', 'lms:'),
+  redisDefaultTtlSeconds: readIntEnv('REDIS_DEFAULT_TTL_SECONDS', 30),
+
+  rateLimitEnabled: readEnv('RATE_LIMIT_ENABLED', '0') === '1',
+  rateLimitWindowSeconds: readIntEnv('RATE_LIMIT_WINDOW_SECONDS', 60),
+  rateLimitMaxRequests: readIntEnv('RATE_LIMIT_MAX_REQUESTS', 60),
 } as const;

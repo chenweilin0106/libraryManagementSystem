@@ -879,6 +879,36 @@ type AnalyticsOverviewResponseData = {
 };
 ```
 
+### 6.2 热门图书榜单（可选，用于性能优化/论文展示）
+
+`GET /api/analytics/hot-books`
+
+权限：
+- 管理员接口（`role=admin`）
+
+Query：
+
+- `limit?`: number，默认 10，最大 50
+
+响应（data 解包后）：
+
+```ts
+type AnalyticsHotBooksResponseData = {
+  items: Array<{
+    book_id: string; // `B-${isbn}`
+    isbn: string;
+    title: string;
+    category: string;
+    cover_url: string;
+    borrow_count: number;
+  }>;
+};
+```
+
+说明：
+- 若 Redis 已启用并有数据，榜单基于 Redis ZSET（论文键：`rank:hot_books`，实际 key 会带前缀）。
+- 若 Redis 未启用或暂无榜单数据，会回退到 MongoDB 聚合统计（仅用于保证接口可用）。
+
 ---
 
 ## 7. 状态码建议（与 mock 对齐）
@@ -889,3 +919,4 @@ type AnalyticsOverviewResponseData = {
 - `403`: 禁止操作（例如内置账号保护）
 - `404`: 资源不存在
 - `409`: 冲突（重复创建、重复借阅、状态不允许变更等）
+- `429`: 请求过于频繁（可选：Redis 限流）

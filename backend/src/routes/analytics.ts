@@ -3,6 +3,8 @@ import Router from '@koa/router';
 import { booksCol, borrowsCol, usersCol } from '../db/collections.js';
 import { requireAdmin } from '../utils/authz.js';
 import { ok } from '../utils/response.js';
+import { buildAnalyticsOverviewCacheKey, getHotBooksRank, withRedisCache } from '../utils/redis-cache.js';
+import { requireRateLimit } from '../utils/rate-limit.js';
 
 type AnalyticsOverviewData = {
   channels: { offline: number; online: number };
@@ -528,8 +530,83 @@ function normalizeMode(input: unknown): AnalyticsOverviewMode {
 export function registerAnalyticsRoutes(router: Router) {
   router.get('/analytics/overview', async (ctx) => {
     requireAdmin(ctx);
+    await requireRateLimit(ctx, { scope: 'analytics:overview' });
     const mode = normalizeMode(ctx.query.mode);
-    const data = await getAnalyticsOverview(mode);
+
+    const { data } = await withRedisCache({
+      key: await buildAnalyticsOverviewCacheKey({ mode }),
+      ttlSeconds: 15,
+      load: async () => await getAnalyticsOverview(mode),
+    });
+
     ok(ctx, data);
+  });
+
+  router.get('/analytics/hot-books', async (ctx) => {
+    requireAdmin(ctx);
+    await requireRateLimit(ctx, { scope: 'analytics:hot-books' });
+    const limitRaw = Number(ctx.query.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, Math.trunc(limitRaw))) : 10;
+
+    const rank = await getHotBooksRank(limit);
+
+    // Redis 未启用/无数据时回退到 Mongo 聚合，保证接口可用
+    const picked =
+      rank.length > 0
+        ? rank
+        : await borrowsCol()
+            .aggregate([
+              {
+                $match: {
+                  status: { $nin: ['reserved', 'canceled'] },
+                },
+              },
+              { $group: { _id: '$isbn', borrowCount: { $sum: 1 } } },
+              { $sort: { borrowCount: -1 } },
+              { $limit: limit },
+            ] as any)
+            .toArray()
+            .then((rows: any[]) =>
+              rows.map((r) => ({
+                bookId: `B-${String(r?._id ?? '').trim()}`,
+                borrowCount: Number(r?.borrowCount ?? 0),
+              })),
+            );
+
+    const isbns = picked
+      .map((r) => {
+        const bookId = String(r.bookId ?? '').trim();
+        if (bookId.startsWith('B-')) return bookId.slice(2);
+        return bookId;
+      })
+      .filter(Boolean);
+
+    const books = await booksCol()
+      .find(
+        { isbn: { $in: isbns } } as any,
+        { projection: { isbn: 1, title: 1, category: 1, cover_url: 1 } as any },
+      )
+      .toArray();
+    const byIsbn = new Map<string, any>();
+    for (const book of books) byIsbn.set(String((book as any).isbn ?? '').trim(), book);
+
+    const items = picked
+      .map((r) => {
+        const bookId = String(r.bookId ?? '').trim();
+        const isbn = bookId.startsWith('B-') ? bookId.slice(2) : bookId;
+        const book = byIsbn.get(isbn);
+        if (!book) return null;
+        return {
+          book_id: `B-${isbn}`,
+          isbn,
+          title: String((book as any).title ?? '').trim(),
+          category: String((book as any).category ?? '').trim() || '其他',
+          cover_url: String((book as any).cover_url ?? '').trim(),
+          borrow_count: Math.max(0, Math.trunc(Number(r.borrowCount ?? 0))),
+        };
+      })
+      .filter(Boolean);
+
+    ok(ctx, { items });
   });
 }

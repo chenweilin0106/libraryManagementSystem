@@ -8,6 +8,7 @@ import { usersCol, type UserDoc, type UserRole, type UserStatus } from '../db/co
 import { requireAdmin } from '../utils/authz.js';
 import { hashPassword } from '../utils/crypto.js';
 import { throwHttpError } from '../utils/http-error.js';
+import { bumpRedisVersion } from '../utils/redis-cache.js';
 import { ok } from '../utils/response.js';
 
 type ParsedRow = {
@@ -422,6 +423,10 @@ export function registerUsersImportRoutes(router: Router) {
     }
 
     importCache.delete(import_id);
+
+    if (created > 0) {
+      void bumpRedisVersion('users').catch(() => {});
+    }
 
     ok(ctx, {
       items,

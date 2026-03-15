@@ -6,6 +6,13 @@ import { booksCol, borrowsCol, usersCol, type BorrowDoc, type BorrowStatus } fro
 import { getAuthState, requireAdmin } from '../utils/authz.js';
 import { clampPage, clampPageSize, formatLocalDateTime, parseLocalDateTime } from '../utils/datetime.js';
 import { throwHttpError } from '../utils/http-error.js';
+import {
+  buildBorrowsListCacheKey,
+  buildBorrowsMyCacheKey,
+  bumpRedisVersion,
+  incrHotBooksRank,
+  withRedisCache,
+} from '../utils/redis-cache.js';
 import { ok } from '../utils/response.js';
 
 function normalizeText(value: unknown) {
@@ -106,11 +113,35 @@ export function registerBorrowsRoutes(router: Router) {
       if (Number.isFinite(returnEnd)) (filter.return_date as any).$lte = new Date(returnEnd);
     }
 
-    const [items, total] = await Promise.all([
-      borrowsCol().find(filter).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
-      borrowsCol().countDocuments(filter),
-    ]);
-    ok(ctx, { items: items.map((doc) => recordToApi(doc, now)), total });
+    const cacheKey = await buildBorrowsListCacheKey({
+      query: {
+        borrowEnd,
+        borrowStart,
+        isbn,
+        page,
+        pageSize,
+        returnEnd,
+        returnStart,
+        status,
+        username,
+      },
+    });
+
+    const { data } = await withRedisCache({
+      key: cacheKey,
+      // status 依赖当前时间（overdue/borrowed/reserved 的边界），TTL 不宜过长
+      ttlSeconds: 10,
+      load: async () => {
+        const now = new Date();
+        const [items, total] = await Promise.all([
+          borrowsCol().find(filter).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
+          borrowsCol().countDocuments(filter),
+        ]);
+        return { items: items.map((doc) => recordToApi(doc, now)), total };
+      },
+    });
+
+    ok(ctx, data);
   });
 
   router.get('/borrows/my', async (ctx) => {
@@ -166,11 +197,35 @@ export function registerBorrowsRoutes(router: Router) {
       if (Number.isFinite(returnEnd)) (filter.return_date as any).$lte = new Date(returnEnd);
     }
 
-    const [items, total] = await Promise.all([
-      borrowsCol().find(filter).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
-      borrowsCol().countDocuments(filter),
-    ]);
-    ok(ctx, { items: items.map((doc) => recordToApi(doc, now)), total });
+    const cacheKey = await buildBorrowsMyCacheKey({
+      userId: auth.userId,
+      query: {
+        borrowEnd,
+        borrowStart,
+        isbn,
+        page,
+        pageSize,
+        returnEnd,
+        returnStart,
+        status,
+      },
+    });
+
+    const { data } = await withRedisCache({
+      key: cacheKey,
+      // status 依赖当前时间（overdue/borrowed/reserved 的边界），TTL 不宜过长
+      ttlSeconds: 10,
+      load: async () => {
+        const now = new Date();
+        const [items, total] = await Promise.all([
+          borrowsCol().find(filter).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
+          borrowsCol().countDocuments(filter),
+        ]);
+        return { items: items.map((doc) => recordToApi(doc, now)), total };
+      },
+    });
+
+    ok(ctx, data);
   });
 
   router.post('/borrows/reserve', async (ctx) => {
@@ -261,6 +316,11 @@ export function registerBorrowsRoutes(router: Router) {
         total_stock: updatedBook.total_stock,
       },
     });
+
+    void Promise.all([
+      bumpRedisVersion('borrows').catch(() => {}),
+      bumpRedisVersion('books').catch(() => {}),
+    ]);
   });
 
   router.put('/borrows/:recordId/cancel', async (ctx) => {
@@ -314,6 +374,11 @@ export function registerBorrowsRoutes(router: Router) {
       .catch(() => {});
 
     ok(ctx, recordToApi(updatedRecord as BorrowDoc, new Date()));
+
+    void Promise.all([
+      bumpRedisVersion('borrows').catch(() => {}),
+      bumpRedisVersion('books').catch(() => {}),
+    ]);
   });
 
   router.post('/borrows/borrow', async (ctx) => {
@@ -400,6 +465,9 @@ export function registerBorrowsRoutes(router: Router) {
           total_stock: latestBook?.total_stock ?? book.total_stock,
         },
       });
+
+      void bumpRedisVersion('borrows').catch(() => {});
+      void incrHotBooksRank({ bookId: `B-${book.isbn}` }).catch(() => {});
       return;
     }
 
@@ -451,6 +519,12 @@ export function registerBorrowsRoutes(router: Router) {
         total_stock: updatedBook.total_stock,
       },
     });
+
+    void Promise.all([
+      bumpRedisVersion('borrows').catch(() => {}),
+      bumpRedisVersion('books').catch(() => {}),
+    ]);
+    void incrHotBooksRank({ bookId: `B-${book.isbn}` }).catch(() => {});
   });
 
   router.put('/borrows/:recordId/return', async (ctx) => {
@@ -511,5 +585,10 @@ export function registerBorrowsRoutes(router: Router) {
       .catch(() => {});
 
     ok(ctx, recordToApi(updatedRecord as BorrowDoc, new Date()));
+
+    void Promise.all([
+      bumpRedisVersion('borrows').catch(() => {}),
+      bumpRedisVersion('books').catch(() => {}),
+    ]);
   });
 }

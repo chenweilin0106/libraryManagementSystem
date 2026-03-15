@@ -2,9 +2,15 @@ import Router from '@koa/router';
 import type { Filter } from 'mongodb';
 
 import { booksCol, type BookDoc } from '../db/collections.js';
-import { requireAdmin } from '../utils/authz.js';
+import { getAuthState, requireAdmin } from '../utils/authz.js';
 import { clampPage, clampPageSize } from '../utils/datetime.js';
 import { throwHttpError } from '../utils/http-error.js';
+import {
+  buildBookByIsbnCacheKey,
+  buildBooksListCacheKey,
+  bumpRedisVersion,
+  withRedisCache,
+} from '../utils/redis-cache.js';
 import { ok } from '../utils/response.js';
 
 const INTRODUCTION_MAX_LEN = 300;
@@ -43,6 +49,7 @@ function bookToApi(doc: BookDoc) {
 
 export function registerBooksRoutes(router: Router) {
   router.get('/books', async (ctx) => {
+    const auth = getAuthState(ctx);
     const page = clampPage(Number(ctx.query.page), 1);
     const pageSize = clampPageSize(Number(ctx.query.pageSize), 20, 100);
     const skip = (page - 1) * pageSize;
@@ -70,12 +77,34 @@ export function registerBooksRoutes(router: Router) {
         ? ({ created_at: order } as const)
         : ({ created_at: -1 } as const);
 
-    const [items, total] = await Promise.all([
-      booksCol().find(filter).sort(sort).skip(skip).limit(pageSize).toArray(),
-      booksCol().countDocuments(filter),
-    ]);
+    const cacheKey = await buildBooksListCacheKey({
+      role: auth.role,
+      query: {
+        author,
+        category,
+        isbn,
+        page,
+        pageSize,
+        sortBy,
+        sortOrder,
+        status,
+        title,
+      },
+    });
 
-    ok(ctx, { items: items.map(bookToApi), total });
+    const { data } = await withRedisCache({
+      key: cacheKey,
+      ttlSeconds: 15,
+      load: async () => {
+        const [items, total] = await Promise.all([
+          booksCol().find(filter).sort(sort).skip(skip).limit(pageSize).toArray(),
+          booksCol().countDocuments(filter),
+        ]);
+        return { items: items.map(bookToApi), total };
+      },
+    });
+
+    ok(ctx, data);
   });
 
   router.post('/books', async (ctx) => {
@@ -130,6 +159,7 @@ export function registerBooksRoutes(router: Router) {
       } as any);
 
       const created = await booksCol().findOne({ _id: inserted.insertedId });
+      void bumpRedisVersion('books').catch(() => {});
       ok(ctx, bookToApi(created as BookDoc));
     } catch (error: any) {
       if (error?.code === 11000) {
@@ -209,6 +239,7 @@ export function registerBooksRoutes(router: Router) {
     );
 
     const updated = await booksCol().findOne({ _id: existing._id });
+    void bumpRedisVersion('books').catch(() => {});
     ok(ctx, bookToApi(updated as BookDoc));
   });
 
@@ -224,6 +255,7 @@ export function registerBooksRoutes(router: Router) {
     if (result.matchedCount === 0) {
       throwHttpError({ status: 404, message: 'NotFound', error: '图书不存在' });
     }
+    void bumpRedisVersion('books').catch(() => {});
     ok(ctx, null);
   });
 
@@ -232,16 +264,25 @@ export function registerBooksRoutes(router: Router) {
     if (!isbn) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'ISBN 不能为空' });
     }
-    const book = await booksCol().findOne({ isbn });
-    if (!book) {
-      throwHttpError({ status: 404, message: 'NotFound', error: '图书不存在' });
-    }
-    ok(ctx, {
-      book_id: `B-${book.isbn}`,
-      current_stock: book.current_stock,
-      isbn: book.isbn,
-      title: book.title,
-      total_stock: book.total_stock,
+
+    const { data } = await withRedisCache({
+      key: await buildBookByIsbnCacheKey({ isbn }),
+      ttlSeconds: 120,
+      load: async () => {
+        const book = await booksCol().findOne({ isbn });
+        if (!book) {
+          throwHttpError({ status: 404, message: 'NotFound', error: '图书不存在' });
+        }
+        return {
+          book_id: `B-${book.isbn}`,
+          current_stock: book.current_stock,
+          isbn: book.isbn,
+          title: book.title,
+          total_stock: book.total_stock,
+        };
+      },
     });
+
+    ok(ctx, data);
   });
 }

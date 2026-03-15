@@ -7,6 +7,7 @@ import { hashPassword } from '../utils/crypto.js';
 import { clampPage, clampPageSize } from '../utils/datetime.js';
 import { requireAdmin } from '../utils/authz.js';
 import { throwHttpError } from '../utils/http-error.js';
+import { buildUsersListCacheKey, bumpRedisVersion, withRedisCache } from '../utils/redis-cache.js';
 import { ok } from '../utils/response.js';
 
 const DEFAULT_PASSWORD = '123456';
@@ -98,11 +99,31 @@ export function registerUsersRoutes(router: Router) {
       if (Number.isFinite(createdEnd)) (filter.created_at as any).$lte = new Date(createdEnd);
     }
 
-    const [items, total] = await Promise.all([
-      usersCol().find(filter).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
-      usersCol().countDocuments(filter),
-    ]);
-    ok(ctx, { items: items.map(userToApi), total });
+    const cacheKey = await buildUsersListCacheKey({
+      query: {
+        createdEnd,
+        createdStart,
+        page,
+        pageSize,
+        role,
+        status,
+        username,
+      },
+    });
+
+    const { data } = await withRedisCache({
+      key: cacheKey,
+      ttlSeconds: 15,
+      load: async () => {
+        const [items, total] = await Promise.all([
+          usersCol().find(filter).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
+          usersCol().countDocuments(filter),
+        ]);
+        return { items: items.map(userToApi), total };
+      },
+    });
+
+    ok(ctx, data);
   });
 
   router.post('/users', async (ctx) => {
@@ -151,6 +172,7 @@ export function registerUsersRoutes(router: Router) {
         password_salt: password.salt,
       } as any);
       const created = await usersCol().findOne({ _id: inserted.insertedId });
+      void bumpRedisVersion('users').catch(() => {});
       ok(ctx, userToApi(created as UserDoc));
     } catch (error: any) {
       if (error?.code === 11000) {
@@ -252,6 +274,7 @@ export function registerUsersRoutes(router: Router) {
     }
 
     const updated = await usersCol().findOne({ _id: existing._id });
+    void bumpRedisVersion('users').catch(() => {});
     ok(ctx, userToApi(updated as UserDoc));
   });
 
@@ -300,6 +323,7 @@ export function registerUsersRoutes(router: Router) {
     }
 
     await usersCol().deleteOne({ _id: existing._id });
+    void bumpRedisVersion('users').catch(() => {});
     ok(ctx, null);
   });
 }

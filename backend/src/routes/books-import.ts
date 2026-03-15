@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import { booksCol, type BookDoc } from '../db/collections.js';
 import { requireAdmin } from '../utils/authz.js';
 import { throwHttpError } from '../utils/http-error.js';
+import { bumpRedisVersion } from '../utils/redis-cache.js';
 import { ok } from '../utils/response.js';
 
 type ConflictStrategy = 'increment_stock' | 'skip' | 'overwrite';
@@ -463,6 +464,10 @@ export function registerBooksImportRoutes(router: Router) {
     }
 
     importCache.delete(import_id);
+
+    if (created + incremented + overwritten > 0) {
+      void bumpRedisVersion('books').catch(() => {});
+    }
 
     ok(ctx, {
       items,
