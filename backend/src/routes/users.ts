@@ -5,7 +5,7 @@ import type { Filter } from 'mongodb';
 import { usersCol, type UserDoc, type UserRole, type UserStatus } from '../db/collections.js';
 import { hashPassword } from '../utils/crypto.js';
 import { clampPage, clampPageSize } from '../utils/datetime.js';
-import { requireAdmin } from '../utils/authz.js';
+import { canAssignRole, canManageTargetRole, requireAdmin } from '../utils/authz.js';
 import { throwHttpError } from '../utils/http-error.js';
 import { buildUsersListCacheKey, bumpRedisVersion, withRedisCache } from '../utils/redis-cache.js';
 import { ok } from '../utils/response.js';
@@ -13,6 +13,8 @@ import { ok } from '../utils/response.js';
 const DEFAULT_PASSWORD = '123456';
 const PROTECTED_USERNAMES = new Set(['admin', 'vben']);
 const CN_PHONE_RE = /^1[3-9]\d{9}$/;
+type UsersSortBy = 'created_at' | 'role';
+type UsersSortOrder = 'asc' | 'desc';
 
 function normalizeText(value: unknown) {
   return String(value ?? '').trim();
@@ -50,7 +52,7 @@ function toNonNegativeNumber(value: unknown) {
 
 function parseRole(value: unknown): UserRole | null {
   const v = normalizeText(value);
-  if (v === 'admin' || v === 'user') return v;
+  if (v === 'super' || v === 'admin' || v === 'user') return v;
   return null;
 }
 
@@ -58,6 +60,18 @@ function parseStatus(value: unknown): UserStatus | null {
   const v = normalizeText(value);
   if (v === '0' || v === '1') return Number(v) as UserStatus;
   if (value === 0 || value === 1) return value as UserStatus;
+  return null;
+}
+
+function parseSortBy(value: unknown): UsersSortBy | null {
+  const v = normalizeText(value);
+  if (v === 'created_at' || v === 'role') return v;
+  return null;
+}
+
+function parseSortOrder(value: unknown): UsersSortOrder | null {
+  const v = normalizeText(value);
+  if (v === 'asc' || v === 'desc') return v;
   return null;
 }
 
@@ -88,9 +102,11 @@ export function registerUsersRoutes(router: Router) {
     const status = normalizeText(ctx.query.status);
     const createdStart = Number(ctx.query.createdStart);
     const createdEnd = Number(ctx.query.createdEnd);
+    const sortBy = parseSortBy(ctx.query.sortBy) ?? 'created_at';
+    const sortOrder = parseSortOrder(ctx.query.sortOrder) ?? 'desc';
 
     if (username) filter.username = { $regex: toLikeRegex(username) };
-    if (role === 'admin' || role === 'user') filter.role = role;
+    if (role === 'super' || role === 'admin' || role === 'user') filter.role = role;
     if (status === '0' || status === '1') filter.status = Number(status) as UserStatus;
 
     if (Number.isFinite(createdStart) || Number.isFinite(createdEnd)) {
@@ -106,6 +122,8 @@ export function registerUsersRoutes(router: Router) {
         page,
         pageSize,
         role,
+        sortBy,
+        sortOrder,
         status,
         username,
       },
@@ -116,7 +134,45 @@ export function registerUsersRoutes(router: Router) {
       ttlSeconds: 15,
       load: async () => {
         const [items, total] = await Promise.all([
-          usersCol().find(filter).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
+          sortBy === 'role'
+            ? usersCol()
+                .aggregate<UserDoc>([
+                  { $match: filter },
+                  {
+                    $addFields: {
+                      __role_sort_priority: {
+                        $switch: {
+                          branches: [
+                            {
+                              case: { $eq: ['$role', 'super'] },
+                              then: sortOrder === 'asc' ? 0 : 2,
+                            },
+                            {
+                              case: { $eq: ['$role', 'admin'] },
+                              then: 1,
+                            },
+                            {
+                              case: { $eq: ['$role', 'user'] },
+                              then: sortOrder === 'asc' ? 2 : 0,
+                            },
+                          ],
+                          default: 99,
+                        },
+                      },
+                    },
+                  },
+                  { $sort: { __role_sort_priority: 1, created_at: -1 } },
+                  { $skip: skip },
+                  { $limit: pageSize },
+                  { $project: { __role_sort_priority: 0 } },
+                ])
+                .toArray()
+            : usersCol()
+                .find(filter)
+                .sort({ created_at: sortOrder === 'asc' ? 1 : -1 })
+                .skip(skip)
+                .limit(pageSize)
+                .toArray(),
           usersCol().countDocuments(filter),
         ]);
         return { items: items.map(userToApi), total };
@@ -127,7 +183,7 @@ export function registerUsersRoutes(router: Router) {
   });
 
   router.post('/users', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const usernameRaw = normalizeText(body.username);
     const { raw: username, lower: usernameLower } = normalizeUsername(usernameRaw);
@@ -145,6 +201,9 @@ export function registerUsersRoutes(router: Router) {
     }
     if (!role) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'role 不合法' });
+    }
+    if (!canAssignRole(auth.role, role)) {
+      throwHttpError({ status: 403, message: 'Forbidden', error: '当前角色不能创建该角色用户' });
     }
     if (status === null) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'status 不合法' });
@@ -186,7 +245,7 @@ export function registerUsersRoutes(router: Router) {
   });
 
   router.put('/users/:id', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const id = normalizeText(ctx.params.id);
     let objectId: ObjectId;
     try {
@@ -198,6 +257,9 @@ export function registerUsersRoutes(router: Router) {
     const existing = await usersCol().findOne({ _id: objectId });
     if (!existing) {
       throwHttpError({ status: 404, message: 'NotFound', error: '用户不存在' });
+    }
+    if (!canManageTargetRole(auth.role, existing.role)) {
+      throwHttpError({ status: 403, message: 'Forbidden', error: '当前角色不能编辑该用户' });
     }
 
     const body = (ctx.request as any).body ?? {};
@@ -217,6 +279,12 @@ export function registerUsersRoutes(router: Router) {
     }
     if (!role) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'role 不合法' });
+    }
+    if (auth.role === 'admin' && role !== existing.role) {
+      throwHttpError({ status: 403, message: 'Forbidden', error: 'admin 不可修改角色' });
+    }
+    if (!canAssignRole(auth.role, role)) {
+      throwHttpError({ status: 403, message: 'Forbidden', error: '当前角色不能设置该角色' });
     }
     if (status === null) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'status 不合法' });
@@ -279,7 +347,7 @@ export function registerUsersRoutes(router: Router) {
   });
 
   router.put('/users/:id/reset-password', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const id = normalizeText(ctx.params.id);
     let objectId: ObjectId;
     try {
@@ -291,6 +359,9 @@ export function registerUsersRoutes(router: Router) {
     const existing = await usersCol().findOne({ _id: objectId });
     if (!existing) {
       throwHttpError({ status: 404, message: 'NotFound', error: '用户不存在' });
+    }
+    if (!canManageTargetRole(auth.role, existing.role)) {
+      throwHttpError({ status: 403, message: 'Forbidden', error: '当前角色不能重置该用户密码' });
     }
     if (isProtectedUsername(existing.username_lower)) {
       throwHttpError({ status: 403, message: 'Forbidden', error: '内置账号禁止重置密码' });
@@ -305,7 +376,7 @@ export function registerUsersRoutes(router: Router) {
   });
 
   router.delete('/users/:id', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const id = normalizeText(ctx.params.id);
     let objectId: ObjectId;
     try {
@@ -317,6 +388,9 @@ export function registerUsersRoutes(router: Router) {
     const existing = await usersCol().findOne({ _id: objectId });
     if (!existing) {
       throwHttpError({ status: 404, message: 'NotFound', error: '用户不存在' });
+    }
+    if (!canManageTargetRole(auth.role, existing.role)) {
+      throwHttpError({ status: 403, message: 'Forbidden', error: '当前角色不能删除该用户' });
     }
     if (isProtectedUsername(existing.username_lower)) {
       throwHttpError({ status: 403, message: 'Forbidden', error: '内置账号禁止删除' });

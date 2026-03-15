@@ -14,6 +14,8 @@ import {
 import { ok } from '../utils/response.js';
 
 const INTRODUCTION_MAX_LEN = 300;
+type BooksSortBy = 'created_at' | 'current_stock';
+type BooksSortOrder = 'asc' | 'desc';
 
 function toNonNegativeInt(value: unknown) {
   const n = Number(value);
@@ -26,6 +28,18 @@ function toNonNegativeInt(value: unknown) {
 function normalizeText(value: unknown) {
   const str = String(value ?? '').trim();
   return str;
+}
+
+function parseSortBy(value: unknown): BooksSortBy | null {
+  const v = normalizeText(value);
+  if (v === 'created_at' || v === 'current_stock') return v;
+  return null;
+}
+
+function parseSortOrder(value: unknown): BooksSortOrder | null {
+  const v = normalizeText(value);
+  if (v === 'asc' || v === 'desc') return v;
+  return null;
 }
 
 function toLikeRegex(value: string) {
@@ -69,13 +83,13 @@ export function registerBooksRoutes(router: Router) {
     if (status === 'normal') filter.is_deleted = false;
     if (status === 'deleted') filter.is_deleted = true;
 
-    const sortBy = normalizeText(ctx.query.sortBy);
-    const sortOrder = normalizeText(ctx.query.sortOrder);
-    const order = sortOrder === 'asc' ? 1 : -1;
-    const sort =
-      sortBy === 'created_at'
-        ? ({ created_at: order } as const)
-        : ({ created_at: -1 } as const);
+    const sortBy = parseSortBy(ctx.query.sortBy) ?? 'created_at';
+    const sortOrder = parseSortOrder(ctx.query.sortOrder) ?? 'desc';
+    const order: 1 | -1 = sortOrder === 'asc' ? 1 : -1;
+    const sort: Record<string, 1 | -1> =
+      sortBy === 'current_stock'
+        ? { current_stock: order, created_at: -1 }
+        : { created_at: order };
 
     const cacheKey = await buildBooksListCacheKey({
       role: auth.role,

@@ -155,9 +155,21 @@
 
 - `username`
 - `realName`
-- `phone`（国内手机号，前端用于“个人中心-安全设置”展示，建议后端始终返回）
+- `phone`（国内手机号，前端用于右上角用户下拉与个人中心展示，建议后端始终返回）
 - `roles: string[]`
 - `homePath?: string`
+
+当前角色模型：
+
+- `roles: ['super']`
+- `roles: ['admin']`
+- `roles: ['user']`
+
+首页跳转：
+
+- `super -> /analytics`
+- `admin -> /analytics`
+- `user -> /user-reservations`
 
 ### 2.6 获取菜单
 
@@ -221,6 +233,7 @@ type UploadResponseData = {
 type UpdateMyProfileBody = {
   realName: string;
   introduction?: string;
+  phone?: string;
   // avatar?: string; // 后续如接入头像上传再补齐
 };
 ```
@@ -230,7 +243,9 @@ type UpdateMyProfileBody = {
 错误：
 
 - 400：`realName` 为空
+- 400：`phone` 格式不合法
 - 401：未登录或登录已过期
+- 409：`phone` 已存在
 
 ---
 
@@ -278,7 +293,7 @@ Query：
 - `page`, `pageSize`
 - `title?`, `author?`, `isbn?`, `category?`
 - `status?`: `'all' | 'normal' | 'deleted'`
-- `sortBy?`: `'created_at'`（可选）
+- `sortBy?`: `'created_at' | 'current_stock'`（可选）
 - `sortOrder?`: `'asc' | 'desc'`（可选，默认 desc）
 
 响应（通用结构 data 解包后）：
@@ -486,6 +501,8 @@ Query：
 - `status?`: `'all' | 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled'`
 - `borrowStart?`, `borrowEnd?`（毫秒）
 - `returnStart?`, `returnEnd?`（毫秒）
+- `sortBy?`: `'borrow_date' | 'due_date'`（可选，默认 `borrow_date`）
+- `sortOrder?`: `'asc' | 'desc'`（可选，默认 `desc`）
 
 返回记录结构（data 解包后）：
 
@@ -657,9 +674,11 @@ Query：
 
 - `page`, `pageSize`
 - `username?`（模糊匹配）
-- `role?`: `'all' | 'admin' | 'user'`
+- `role?`: `'all' | 'super' | 'admin' | 'user'`
 - `status?`: `'all' | 0 | 1`
 - `createdStart?`, `createdEnd?`（毫秒）
+- `sortBy?`: `'created_at' | 'role'`（可选，默认 `created_at`）
+- `sortOrder?`: `'asc' | 'desc'`（可选，默认 `desc`）
 
 返回（data 解包后）：
 
@@ -669,7 +688,7 @@ type UsersListResponseData = {
     _id: string;
     username: string;
     phone: string;        // 国内手机号（11 位），必填且唯一
-    role: 'admin' | 'user';
+    role: 'super' | 'admin' | 'user';
     status: 0 | 1;
     credit_score: number;
     avatar?: string;
@@ -705,6 +724,9 @@ type CreateUserBody = {
 - `username` 唯一（409）
 - `phone` 唯一（409）
 - 禁止创建内置账号同名：`admin`、`vben`（400/409 均可，mock 为 400）
+- `admin` 仅允许创建 `user`
+- `super` 允许创建 `admin | user`
+- 不允许通过用户管理创建新的 `super`
 
 ### 5.3 编辑用户
 
@@ -717,6 +739,8 @@ Body 同新增。
 - 404：用户不存在
 - 409：用户名冲突
 - 403：内置账号保护（见 5.6）
+- 403：`admin` 仅可编辑 `user`
+- 403：仅 `super` 可修改角色
 
 ### 5.4 重置密码
 
@@ -726,6 +750,8 @@ Body 同新增。
 
 - mock 中默认重置为 `123456`
 - 真实后端应重置为安全的默认策略（或随机密码 + 通知），但如果要保持前端不改动，建议先按 `123456` 实现
+- `admin` 仅允许重置 `user`
+- `super` 允许重置 `admin | user`
 
 错误：
 
@@ -733,6 +759,12 @@ Body 同新增。
 - 403：内置账号禁止重置
 
 ### 5.5 删除用户
+
+说明：
+
+- `admin` 仅允许删除 `user`
+- `super` 允许删除 `admin | user`
+- `super` 用户不允许作为用户管理目标被编辑/删除/重置
 
 `DELETE /api/users/:id`
 

@@ -15,8 +15,23 @@ import {
 } from '../utils/redis-cache.js';
 import { ok } from '../utils/response.js';
 
+type BorrowsSortBy = 'borrow_date' | 'due_date';
+type BorrowsSortOrder = 'asc' | 'desc';
+
 function normalizeText(value: unknown) {
   return String(value ?? '').trim();
+}
+
+function parseSortBy(value: unknown): BorrowsSortBy | null {
+  const v = normalizeText(value);
+  if (v === 'borrow_date' || v === 'due_date') return v;
+  return null;
+}
+
+function parseSortOrder(value: unknown): BorrowsSortOrder | null {
+  const v = normalizeText(value);
+  if (v === 'asc' || v === 'desc') return v;
+  return null;
 }
 
 function toLikeRegex(value: string) {
@@ -76,6 +91,8 @@ export function registerBorrowsRoutes(router: Router) {
     const borrowEnd = Number(ctx.query.borrowEnd);
     const returnStart = Number(ctx.query.returnStart);
     const returnEnd = Number(ctx.query.returnEnd);
+    const sortBy = parseSortBy(ctx.query.sortBy) ?? 'borrow_date';
+    const sortOrder = parseSortOrder(ctx.query.sortOrder) ?? 'desc';
 
     if (username) filter.username = { $regex: toLikeRegex(username) } as any;
     if (isbn) filter.isbn = { $regex: toLikeRegex(isbn) } as any;
@@ -122,6 +139,8 @@ export function registerBorrowsRoutes(router: Router) {
         pageSize,
         returnEnd,
         returnStart,
+        sortBy,
+        sortOrder,
         status,
         username,
       },
@@ -133,8 +152,13 @@ export function registerBorrowsRoutes(router: Router) {
       ttlSeconds: 10,
       load: async () => {
         const now = new Date();
+        const order: 1 | -1 = sortOrder === 'asc' ? 1 : -1;
+        const sort: Record<string, 1 | -1> =
+          sortBy === 'due_date'
+            ? { due_date: order, created_at: -1 }
+            : { borrow_date: order, created_at: -1 };
         const [items, total] = await Promise.all([
-          borrowsCol().find(filter).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
+          borrowsCol().find(filter).sort(sort).skip(skip).limit(pageSize).toArray(),
           borrowsCol().countDocuments(filter),
         ]);
         return { items: items.map((doc) => recordToApi(doc, now)), total };
