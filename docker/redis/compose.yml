@@ -1,0 +1,20 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: lms-redis
+    ports:
+      # 仅绑定本机，避免局域网暴露
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - lms-redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  lms-redis-data:
+
