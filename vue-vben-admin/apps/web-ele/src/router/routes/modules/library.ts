@@ -3,7 +3,7 @@ import type { RouteRecordRaw } from 'vue-router';
 import { $t } from '#/locales';
 
 const ENABLE_ADMIN_USER_PAGES =
-  import.meta.env.DEV || import.meta.env.VITE_ENABLE_ADMIN_USER_PAGES === 'true';
+  import.meta.env.VITE_ENABLE_ADMIN_USER_PAGES === 'true';
 const ADMIN_AUTHORITY = ['super'];
 const USER_AUTHORITY = ENABLE_ADMIN_USER_PAGES ? ['user', 'super'] : ['user'];
 
