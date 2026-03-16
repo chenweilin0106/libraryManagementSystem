@@ -17,7 +17,6 @@ function Require-Command([string]$Name) {
 
 Require-Command 'wt'
 Require-Command 'pwsh'
-Require-Command 'wsl'
 
 $dbCmd = @"
 try {
@@ -139,8 +138,12 @@ pnpm.cmd -C vue-vben-admin dev:ele
 "@
 
 $codexCmd = @"
-Write-Host '进入 WSL 并启动 codex（退出 WSL 会回到 PowerShell）'
-wsl.exe -d 'Ubuntu' -- bash -ilc '(codex || true) && exec bash -il'
+if (-not (Get-Command 'codex' -ErrorAction SilentlyContinue)) {
+  Write-Host '未找到命令：codex。请确认已安装并加入 PATH。'
+} else {
+  Write-Host '启动 codex：codex'
+  codex
+}
 "@
 
 $wtArgs = @(
@@ -152,7 +155,7 @@ $wtArgs = @(
   ';',
   'new-tab', '--title', '前端', '--startingDirectory', $root, 'pwsh', '-NoExit', '-Command', $frontendCmd,
   ';',
-  # codex：以 PowerShell 作为 tab 入口进程（外观与其它 tab 一致），再进入 WSL 启动 codex；codex 退出后保留 WSL shell
+  # codex：以 PowerShell 作为 tab 入口进程（外观与其它 tab 一致），在 Windows 环境直接启动 codex；codex 退出后保留 PowerShell
   'new-tab', '--title', 'codex', '--startingDirectory', $root, 'pwsh', '-NoExit', '-Command', $codexCmd
 )
 
