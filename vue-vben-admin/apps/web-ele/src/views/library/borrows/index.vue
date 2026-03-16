@@ -5,13 +5,13 @@ import type { VxeGridListeners, VxeGridProps } from '#/adapter/vxe-table';
 import { computed, h, nextTick, ref } from 'vue';
 
 import { Page, useVbenDrawer } from '@vben/common-ui';
-
 import {
   ElButton,
   ElDescriptions,
   ElDescriptionsItem,
   ElDialog,
   ElMessage,
+  ElMessageBox,
   ElTag,
 } from 'element-plus';
 
@@ -20,6 +20,7 @@ import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import type { BorrowsApi } from '#/api';
 import {
   borrowBookApi,
+  cancelBorrowReservationApi,
   getBookByIsbnApi,
   listBorrowsApi,
   returnBookApi,
@@ -31,15 +32,31 @@ type BorrowStatus = BorrowsApi.BorrowStatus;
 type BorrowRecord = BorrowsApi.BorrowRecord;
 type BorrowSortBy = NonNullable<BorrowsApi.ListParams['sortBy']>;
 type BorrowSortOrder = NonNullable<BorrowsApi.ListParams['sortOrder']>;
+type DrawerMode = 'borrow' | 'confirm-borrow' | 'return';
+
+const SORTABLE_FIELDS = new Set<BorrowSortBy>([
+  'reserved_at',
+  'pickup_due_at',
+  'borrowed_at',
+  'return_due_at',
+  'returned_at',
+]);
 
 const gridPager = ref({ currentPage: 1, pageSize: 20 });
 const DEFAULT_GRID_SORT: { field: BorrowSortBy; order: BorrowSortOrder } = {
-  field: 'borrow_date',
+  field: 'created_at',
   order: 'desc',
 };
 const gridSortState = ref<{ field: BorrowSortBy; order: BorrowSortOrder }>({
   ...DEFAULT_GRID_SORT,
 });
+
+const drawerMode = ref<DrawerMode>('borrow');
+const queryingBook = ref(false);
+const cancelingRecordId = ref('');
+const activeRecord = ref<BorrowRecord | null>(null);
+const detailRecord = ref<BorrowRecord | null>(null);
+const detailOpen = ref(false);
 
 function pad2(num: number) {
   return String(num).padStart(2, '0');
@@ -62,7 +79,6 @@ function toMs(value: unknown) {
   const str = String(value).trim();
   if (!str) return null;
 
-  // 约定：按“本地时区”解析，避免 YYYY-MM-DD 被当成 UTC 导致跨天误差
   const normalized = str.replace(/\//g, '-');
   const m = normalized.match(
     /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
@@ -78,7 +94,6 @@ function toMs(value: unknown) {
     return Number.isFinite(ms) ? ms : null;
   }
 
-  // 兜底：解析 ISO / 其他格式
   const asDate = new Date(str);
   const ms = asDate.getTime();
   return Number.isFinite(ms) ? ms : null;
@@ -91,65 +106,96 @@ function normalizeRange(range: unknown) {
   const endStr = typeof endRaw === 'string' ? endRaw.trim() : '';
   const endMs = toMs(endRaw);
   if (startMs === null || endMs === null) return null;
-
-  // daterange 常见是 YYYY-MM-DD，结束时间补到当天 23:59:59.999
   if (endStr && /^\d{4}-\d{2}-\d{2}$/.test(endStr)) {
     return [startMs, endMs + 24 * 60 * 60 * 1000 - 1] as const;
   }
   return [startMs, endMs] as const;
 }
 
-function getEffectiveStatus(record: BorrowRecord): BorrowStatus {
-  if (record.status === 'canceled') return 'canceled';
-  if (record.return_date) return 'returned';
-  const dueMs = toMs(record.due_date);
-  if (dueMs !== null && Date.now() > dueMs) return 'overdue';
-  return record.status === 'reserved' ? 'reserved' : 'borrowed';
+function displayTime(value?: string) {
+  return String(value ?? '').trim() || '-';
+}
+
+function statusLabel(status: BorrowStatus) {
+  switch (status) {
+    case 'reserved':
+      return '待取书';
+    case 'reserve_overdue':
+      return '待取超期';
+    case 'borrowed':
+      return '借阅中';
+    case 'borrow_overdue':
+      return '借阅逾期';
+    case 'returned':
+      return '已归还';
+    case 'canceled':
+      return '已取消';
+    default:
+      return status;
+  }
+}
+
+function statusTagType(status: BorrowStatus) {
+  switch (status) {
+    case 'reserved':
+      return 'warning';
+    case 'reserve_overdue':
+    case 'borrow_overdue':
+      return 'danger';
+    case 'borrowed':
+      return 'success';
+    default:
+      return 'info';
+  }
+}
+
+function canConfirmBorrow(record: BorrowRecord) {
+  return record.status === 'reserved';
+}
+
+function canCancelReservation(record: BorrowRecord) {
+  return record.status === 'reserved' || record.status === 'reserve_overdue';
 }
 
 function canReturn(record: BorrowRecord) {
-  const status = getEffectiveStatus(record);
-  return status === 'borrowed' || status === 'overdue' || status === 'reserved';
+  return record.status === 'borrowed' || record.status === 'borrow_overdue';
+}
+
+function canViewDetail(record: BorrowRecord) {
+  return record.status === 'returned' || record.status === 'canceled';
+}
+
+function displayReservedAt(record: BorrowRecord) {
+  return displayTime(record.reserved_at);
+}
+
+function displayPickupDueAt(record: BorrowRecord) {
+  return displayTime(record.pickup_due_at);
+}
+
+function displayBorrowedAt(record: BorrowRecord) {
+  return displayTime(record.borrowed_at);
+}
+
+function displayReturnDueAt(record: BorrowRecord) {
+  return displayTime(record.return_due_at);
+}
+
+function displayReturnedAt(record: BorrowRecord) {
+  return displayTime(record.returned_at);
 }
 
 function resetGridSortToDefault() {
   gridSortState.value = { ...DEFAULT_GRID_SORT };
 }
 
-async function syncGridSortIndicator() {
-  const grid = gridApi.grid;
-  if (!grid) return;
-  await nextTick();
-  await grid.sort({
-    field: gridSortState.value.field,
-    order: gridSortState.value.order,
-  });
-}
-
-const gridEvents: VxeGridListeners<BorrowRecord> = {
-  sortChange: ({ field, order }) => {
-    if (field !== 'borrow_date' && field !== 'due_date') return;
-    if (order === 'asc' || order === 'desc') {
-      gridSortState.value = {
-        field,
-        order,
-      };
-      return;
-    }
-    resetGridSortToDefault();
-  },
-  toolbarToolClick: ({ code }) => {
-    if (code !== 'refresh') return;
-    resetGridSortToDefault();
-  },
-};
-
 const STATUS_OPTIONS: Array<{ label: string; value: BorrowStatus | 'all' }> = [
   { label: '全部', value: 'all' },
-  { label: '借阅中', value: 'borrowed' },
-  { label: '已归还', value: 'returned' },
-  { label: '逾期', value: 'overdue' },
   { label: '待取书', value: 'reserved' },
+  { label: '待取超期', value: 'reserve_overdue' },
+  { label: '借阅中', value: 'borrowed' },
+  { label: '借阅逾期', value: 'borrow_overdue' },
+  { label: '已归还', value: 'returned' },
   { label: '已取消', value: 'canceled' },
 ];
 
@@ -195,7 +241,7 @@ const gridFormOptions: VbenFormProps = {
         valueFormat: 'YYYY-MM-DD',
       },
       fieldName: 'borrow_date_range',
-      label: '借出时间',
+      label: '预约/借出时间',
     },
     {
       component: 'DatePicker',
@@ -207,7 +253,7 @@ const gridFormOptions: VbenFormProps = {
         valueFormat: 'YYYY-MM-DD',
       },
       fieldName: 'return_date_range',
-      label: '归还时间',
+      label: '实际归还时间',
     },
   ],
   showCollapseButton: true,
@@ -219,33 +265,43 @@ const gridFormOptions: VbenFormProps = {
 const gridOptions: VxeGridProps<BorrowRecord> = {
   columns: [
     { title: '序号', type: 'seq', width: 60 },
-    { field: 'record_id', title: '借阅记录ID', width: 140 },
+    { field: 'record_id', title: '借阅记录ID', width: 150 },
     { field: 'username', title: '用户名', width: 120 },
     { field: 'isbn', title: 'ISBN', width: 160 },
     { field: 'book_title', title: '书名', minWidth: 180 },
+    { field: 'status', slots: { default: 'status' }, title: '状态', width: 110 },
     {
-      field: 'status',
-      slots: { default: 'status' },
-      title: '状态',
-      width: 90,
+      field: 'reserved_at',
+      sortable: true,
+      slots: { default: 'reservedAt' },
+      title: '预约时间',
+      width: 180,
     },
     {
-      field: 'borrow_date',
-      formatter: 'formatDateTime',
+      field: 'pickup_due_at',
       sortable: true,
+      slots: { default: 'pickupDueAt' },
+      title: '待取截止时间',
+      width: 180,
+    },
+    {
+      field: 'borrowed_at',
+      sortable: true,
+      slots: { default: 'borrowedAt' },
       title: '借出时间',
       width: 180,
     },
     {
-      field: 'due_date',
-      formatter: 'formatDateTime',
+      field: 'return_due_at',
       sortable: true,
+      slots: { default: 'returnDueAt' },
       title: '应还时间',
       width: 180,
     },
     {
-      field: 'return_date',
-      formatter: 'formatDateTime',
+      field: 'returned_at',
+      sortable: true,
+      slots: { default: 'returnedAt' },
       title: '实际归还时间',
       width: 180,
     },
@@ -255,7 +311,7 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
       fixed: 'right',
       slots: { default: 'actions' },
       title: '操作',
-      width: 180,
+      width: 220,
     },
   ],
   height: 'auto',
@@ -276,20 +332,18 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
           pageSize: page.pageSize,
         };
 
-        const nextSortField = sort?.field;
-        const nextSortOrder = sort?.order;
+        const nextSortField = sort?.field as BorrowSortBy | undefined;
+        const nextSortOrder = sort?.order as BorrowSortOrder | undefined;
         if (
-          (nextSortField === 'borrow_date' || nextSortField === 'due_date') &&
+          nextSortField &&
+          SORTABLE_FIELDS.has(nextSortField) &&
           (nextSortOrder === 'asc' || nextSortOrder === 'desc')
         ) {
           gridSortState.value = {
             field: nextSortField,
             order: nextSortOrder,
           };
-        } else if (
-          nextSortField === 'borrow_date' ||
-          nextSortField === 'due_date'
-        ) {
+        } else if (nextSortField && SORTABLE_FIELDS.has(nextSortField)) {
           resetGridSortToDefault();
         }
 
@@ -310,9 +364,6 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
           username: formValues.username,
         });
       },
-      querySuccess: async () => {
-        await syncGridSortIndicator();
-      },
     },
     sort: true,
   },
@@ -320,7 +371,6 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
     keyField: 'record_id',
   },
   sortConfig: {
-    defaultSort: { field: 'borrow_date', order: 'desc' },
     remote: true,
   },
   toolbarConfig: {
@@ -330,6 +380,22 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
     // @ts-expect-error vxe-table 插件对 search 类型有裁剪
     search: true,
     zoom: true,
+  },
+};
+
+const gridEvents: VxeGridListeners<BorrowRecord> = {
+  sortChange: ({ field, order }) => {
+    const nextField = field as BorrowSortBy;
+    if (!SORTABLE_FIELDS.has(nextField)) return;
+    if (order === 'asc' || order === 'desc') {
+      gridSortState.value = { field: nextField, order };
+      return;
+    }
+    resetGridSortToDefault();
+  },
+  toolbarToolClick: ({ code }) => {
+    if (code !== 'refresh') return;
+    resetGridSortToDefault();
   },
 };
 
@@ -343,28 +409,31 @@ function refresh() {
   gridApi.query();
 }
 
-const drawerMode = ref<'borrow' | 'return'>('borrow');
-const drawerConfirmText = computed(() =>
-  drawerMode.value === 'borrow' ? '确认借书' : '确认还书',
-);
-const drawerTitle = computed(() =>
-  drawerMode.value === 'borrow' ? '借书' : '还书',
-);
+const drawerTitle = computed(() => {
+  switch (drawerMode.value) {
+    case 'borrow':
+      return '借书';
+    case 'confirm-borrow':
+      return '确认借出';
+    case 'return':
+      return '还书';
+    default:
+      return '借阅操作';
+  }
+});
 
-const activeRecord = ref<BorrowRecord | null>(null);
-const detailRecord = ref<BorrowRecord | null>(null);
-const detailOpen = ref(false);
-
-function openDetail(record: BorrowRecord) {
-  detailRecord.value = record;
-  detailOpen.value = true;
-}
-
-function onDetailClosed() {
-  detailRecord.value = null;
-}
-
-const queryingBook = ref(false);
+const drawerConfirmText = computed(() => {
+  switch (drawerMode.value) {
+    case 'borrow':
+      return '确认借书';
+    case 'confirm-borrow':
+      return '确认借出';
+    case 'return':
+      return '确认还书';
+    default:
+      return '确认';
+  }
+});
 
 const borrowFormSchema: VbenFormSchema[] = [
   {
@@ -372,8 +441,7 @@ const borrowFormSchema: VbenFormSchema[] = [
     componentProps: { clearable: true, placeholder: '请输入 ISBN' },
     dependencies: {
       trigger(_values, form) {
-        // vee-validate 的 setValues 默认会触发校验，这里仅做联动清空，不触发校验
-        form.setValues({ book_id: '', book_title: '', book_stock: 0 }, false);
+        form.setValues({ book_id: '', book_stock: 0, book_title: '' }, false);
       },
       triggerFields: ['isbn'],
     },
@@ -387,12 +455,10 @@ const borrowFormSchema: VbenFormSchema[] = [
             disabled: queryingBook.value,
             loading: queryingBook.value,
             type: 'primary',
-            // 仅覆盖背景色/文字色（直接写样式，确保优先级足够），其它样式尽量走默认
             style: queryingBook.value
               ? undefined
               : {
                   backgroundColor: 'var(--el-color-primary)',
-                  // 和输入框连体：左侧保持直角，右侧保留默认圆角
                   borderBottomLeftRadius: '0px',
                   borderTopLeftRadius: '0px',
                   color: 'var(--el-color-white)',
@@ -438,7 +504,7 @@ const borrowFormSchema: VbenFormSchema[] = [
       type: 'datetime',
       valueFormat: 'YYYY-MM-DD HH:mm:ss',
     },
-    fieldName: 'borrow_date',
+    fieldName: 'borrowed_at',
     label: '借出时间',
     rules: z.string().min(1, { message: '请选择借出时间' }),
   },
@@ -454,39 +520,72 @@ const borrowFormSchema: VbenFormSchema[] = [
     componentProps: { disabled: true, placeholder: '自动计算' },
     dependencies: {
       trigger(values, form) {
-        const borrowMs = toMs(values.borrow_date);
+        const borrowMs = toMs(values.borrowed_at);
         const days = Number(values.borrow_days ?? 0);
         if (borrowMs === null || !Number.isFinite(days) || days <= 0) {
-          form.setValues({ due_date: '' }, false);
+          form.setValues({ return_due_at: '' }, false);
           return;
         }
         const due = new Date(borrowMs + days * 24 * 60 * 60 * 1000);
-        form.setValues({ due_date: formatDateTimeString(due) }, false);
+        form.setValues({ return_due_at: formatDateTimeString(due) }, false);
       },
-      triggerFields: ['borrow_date', 'borrow_days'],
+      triggerFields: ['borrowed_at', 'borrow_days'],
     },
-    fieldName: 'due_date',
+    fieldName: 'return_due_at',
     label: '应还时间',
   },
 ];
 
-const [BorrowForm, borrowFormApi] = useVbenForm({
-  commonConfig: {
-    componentProps: {
-      class: 'w-full',
-    },
+const confirmBorrowFormSchema: VbenFormSchema[] = [
+  {
+    component: 'Input',
+    componentProps: { disabled: true },
+    fieldName: 'record_id',
+    label: '借阅记录ID',
   },
-  handleSubmit: handleBorrowSubmit,
-  layout: 'horizontal',
-  schema: borrowFormSchema,
-  showDefaultActions: false,
-  wrapperClass: 'grid-cols-1',
-});
+  {
+    component: 'DatePicker',
+    componentProps: {
+      placeholder: '请选择借出时间',
+      type: 'datetime',
+      valueFormat: 'YYYY-MM-DD HH:mm:ss',
+    },
+    fieldName: 'borrowed_at',
+    label: '借出时间',
+    rules: z.string().min(1, { message: '请选择借出时间' }),
+  },
+  {
+    component: 'InputNumber',
+    componentProps: { min: 1, placeholder: '请输入借阅期限（天）' },
+    fieldName: 'borrow_days',
+    label: '借阅期限（天）',
+    rules: z.coerce.number().min(1, { message: '请输入借阅期限（天）' }),
+  },
+  {
+    component: 'Input',
+    componentProps: { disabled: true, placeholder: '自动计算' },
+    dependencies: {
+      trigger(values, form) {
+        const borrowMs = toMs(values.borrowed_at);
+        const days = Number(values.borrow_days ?? 0);
+        if (borrowMs === null || !Number.isFinite(days) || days <= 0) {
+          form.setValues({ return_due_at: '' }, false);
+          return;
+        }
+        const due = new Date(borrowMs + days * 24 * 60 * 60 * 1000);
+        form.setValues({ return_due_at: formatDateTimeString(due) }, false);
+      },
+      triggerFields: ['borrowed_at', 'borrow_days'],
+    },
+    fieldName: 'return_due_at',
+    label: '应还时间',
+  },
+];
 
 const returnFormSchema: VbenFormSchema[] = [
   {
     component: 'Input',
-    componentProps: { disabled: true, placeholder: '自动填充' },
+    componentProps: { disabled: true },
     fieldName: 'record_id',
     label: '借阅记录ID',
     rules: z.string().min(1, { message: '借阅记录ID缺失' }),
@@ -498,7 +597,7 @@ const returnFormSchema: VbenFormSchema[] = [
       type: 'datetime',
       valueFormat: 'YYYY-MM-DD HH:mm:ss',
     },
-    fieldName: 'return_date',
+    fieldName: 'returned_at',
     label: '实际归还时间',
     rules: z.string().min(1, { message: '请选择归还时间' }),
   },
@@ -512,11 +611,31 @@ const returnFormSchema: VbenFormSchema[] = [
   },
 ];
 
+const [BorrowForm, borrowFormApi] = useVbenForm({
+  commonConfig: {
+    componentProps: { class: 'w-full' },
+  },
+  handleSubmit: handleBorrowSubmit,
+  layout: 'horizontal',
+  schema: borrowFormSchema,
+  showDefaultActions: false,
+  wrapperClass: 'grid-cols-1',
+});
+
+const [ConfirmBorrowForm, confirmBorrowFormApi] = useVbenForm({
+  commonConfig: {
+    componentProps: { class: 'w-full' },
+  },
+  handleSubmit: handleConfirmBorrowSubmit,
+  layout: 'horizontal',
+  schema: confirmBorrowFormSchema,
+  showDefaultActions: false,
+  wrapperClass: 'grid-cols-1',
+});
+
 const [ReturnForm, returnFormApi] = useVbenForm({
   commonConfig: {
-    componentProps: {
-      class: 'w-full',
-    },
+    componentProps: { class: 'w-full' },
   },
   handleSubmit: handleReturnSubmit,
   layout: 'horizontal',
@@ -524,152 +643,6 @@ const [ReturnForm, returnFormApi] = useVbenForm({
   showDefaultActions: false,
   wrapperClass: 'grid-cols-1',
 });
-
-async function onQueryBookByIsbn() {
-  const { isbn } = await borrowFormApi.getValues();
-  const trimmed = String(isbn ?? '').trim();
-  if (!trimmed) {
-    ElMessage.warning('请输入 ISBN');
-    return;
-  }
-  queryingBook.value = true;
-  try {
-    try {
-      const find = await getBookByIsbnApi(trimmed);
-      borrowFormApi.setValues({
-        book_id: find.book_id,
-        book_stock: find.current_stock ?? 0,
-        book_title: find.title ?? '',
-      });
-    } catch {
-      borrowFormApi.setValues({ book_id: '', book_title: '', book_stock: 0 });
-    }
-  } finally {
-    queryingBook.value = false;
-  }
-}
-
-function openBorrowDrawer() {
-  drawerMode.value = 'borrow';
-  activeRecord.value = null;
-  drawerApi
-    .setState({ title: drawerTitle.value, confirmText: drawerConfirmText.value })
-    .open();
-  nextTick(() => {
-    borrowFormApi.resetForm();
-    borrowFormApi.setValues({
-      borrow_date: formatDateTimeString(new Date()),
-      borrow_days: 30,
-      due_date: '',
-      isbn: '',
-      book_id: '',
-      book_title: '',
-      book_stock: 0,
-      username: '',
-    });
-    borrowFormApi.resetValidate();
-  });
-}
-
-function openReturnDrawer(record: BorrowRecord) {
-  if (!canReturn(record)) {
-    ElMessage.info('该记录不可还书');
-    return;
-  }
-  drawerMode.value = 'return';
-  activeRecord.value = record;
-  drawerApi
-    .setState({ title: drawerTitle.value, confirmText: drawerConfirmText.value })
-    .open();
-  nextTick(() => {
-    returnFormApi.resetForm();
-    returnFormApi.setValues({
-      record_id: record.record_id,
-      return_date: formatDateTimeString(new Date()),
-      fine_amount: record.fine_amount ?? 0,
-    });
-    returnFormApi.resetValidate();
-  });
-}
-
-async function tryBorrow(values: Record<string, any>) {
-  const isbn = String(values.isbn ?? '').trim();
-  const username = String(values.username ?? '').trim();
-  const bookId = String(values.book_id ?? '').trim();
-  const bookTitle = String(values.book_title ?? '').trim();
-  const borrowDate = String(values.borrow_date ?? '').trim();
-  const borrowDays = Number(values.borrow_days ?? 0);
-  const dueDate = String(values.due_date ?? '').trim();
-
-  if (!bookId || !bookTitle) {
-    ElMessage.warning('请先查询 ISBN 获取图书信息');
-    return false;
-  }
-
-  try {
-    const { book } = await borrowBookApi({
-      borrow_date: borrowDate,
-      borrow_days: borrowDays,
-      due_date: dueDate || borrowDate,
-      isbn,
-      username,
-    });
-
-    const currentStock = (book as any)?.current_stock;
-    if (typeof currentStock === 'number') {
-      borrowFormApi.setValues({ book_stock: currentStock });
-    }
-
-    ElMessage.success('借书成功');
-    refresh();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function handleBorrowSubmit(values: Record<string, any>) {
-  await tryBorrow(values);
-}
-
-async function tryReturn(values: Record<string, any>) {
-  const recordId = String(values.record_id ?? '').trim();
-  const returnDate = String(values.return_date ?? '').trim();
-  const fineAmount = Number(values.fine_amount ?? 0);
-
-  try {
-    await returnBookApi(recordId, {
-      fine_amount: Number.isFinite(fineAmount) ? fineAmount : 0,
-      return_date: returnDate,
-    });
-    ElMessage.success('还书成功');
-    refresh();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function handleReturnSubmit(values: Record<string, any>) {
-  await tryReturn(values);
-}
-
-async function onDrawerConfirm() {
-  if (drawerMode.value === 'borrow') {
-    const { valid } = await borrowFormApi.validate();
-    if (!valid) return;
-    const values = await borrowFormApi.getValues();
-    const ok = await tryBorrow(values);
-    if (ok) drawerApi.close();
-    return;
-  }
-
-  const { valid } = await returnFormApi.validate();
-  if (!valid) return;
-  const values = await returnFormApi.getValues();
-  const ok = await tryReturn(values);
-  if (ok) drawerApi.close();
-}
 
 const [Drawer, drawerApi] = useVbenDrawer({
   destroyOnClose: true,
@@ -682,36 +655,277 @@ const [Drawer, drawerApi] = useVbenDrawer({
   onConfirm: onDrawerConfirm,
 });
 
-function statusTagType(status: BorrowStatus) {
-  switch (status) {
-    case 'returned':
-      return 'success';
-    case 'overdue':
-      return 'danger';
-    case 'borrowed':
-      return 'warning';
-    case 'canceled':
-      return 'info';
-    default:
-      return 'info';
+const [CancelDrawer, cancelDrawerApi] = useVbenDrawer({
+  destroyOnClose: true,
+  onCancel() {
+    cancelDrawerApi.close();
+  },
+  onClosed() {
+    activeRecord.value = null;
+    cancelingRecordId.value = '';
+  },
+  title: '取消预约',
+});
+
+async function onQueryBookByIsbn() {
+  const { isbn } = await borrowFormApi.getValues();
+  const trimmed = String(isbn ?? '').trim();
+  if (!trimmed) {
+    ElMessage.warning('请输入 ISBN');
+    return;
+  }
+  queryingBook.value = true;
+  try {
+    const book = await getBookByIsbnApi(trimmed);
+    borrowFormApi.setValues({
+      book_id: `B-${book.isbn}`,
+      book_stock: book.current_stock ?? 0,
+      book_title: book.title ?? '',
+    });
+  } catch {
+    borrowFormApi.setValues({ book_id: '', book_stock: 0, book_title: '' });
+    ElMessage.warning('图书不存在');
+  } finally {
+    queryingBook.value = false;
   }
 }
 
-function statusLabel(status: BorrowStatus) {
-  switch (status) {
-    case 'returned':
-      return '已归还';
-    case 'overdue':
-      return '逾期';
-    case 'borrowed':
-      return '借阅中';
-    case 'reserved':
-      return '待取书';
-    case 'canceled':
-      return '已取消';
-    default:
-      return status;
+function openBorrowDrawer() {
+  drawerMode.value = 'borrow';
+  activeRecord.value = null;
+  drawerApi.setState({ title: drawerTitle.value, confirmText: drawerConfirmText.value }).open();
+  nextTick(() => {
+    borrowFormApi.resetForm();
+    borrowFormApi.setValues({
+      book_id: '',
+      book_stock: 0,
+      book_title: '',
+      borrow_days: 30,
+      borrowed_at: formatDateTimeString(new Date()),
+      isbn: '',
+      return_due_at: '',
+      username: '',
+    });
+    borrowFormApi.resetValidate();
+  });
+}
+
+function openConfirmBorrowDrawer(record: BorrowRecord) {
+  if (!canConfirmBorrow(record)) {
+    ElMessage.info('该记录当前不可确认借出');
+    return;
   }
+  drawerMode.value = 'confirm-borrow';
+  activeRecord.value = record;
+  drawerApi.setState({ title: drawerTitle.value, confirmText: drawerConfirmText.value }).open();
+  nextTick(() => {
+    confirmBorrowFormApi.resetForm();
+    confirmBorrowFormApi.setValues({
+      borrow_days: 30,
+      borrowed_at: formatDateTimeString(new Date()),
+      record_id: record.record_id,
+      return_due_at: '',
+    });
+    confirmBorrowFormApi.resetValidate();
+  });
+}
+
+function openReturnDrawer(record: BorrowRecord) {
+  if (!canReturn(record)) {
+    ElMessage.info('该记录不可还书');
+    return;
+  }
+  drawerMode.value = 'return';
+  activeRecord.value = record;
+  drawerApi.setState({ title: drawerTitle.value, confirmText: drawerConfirmText.value }).open();
+  nextTick(() => {
+    returnFormApi.resetForm();
+    returnFormApi.setValues({
+      fine_amount: record.fine_amount ?? 0,
+      record_id: record.record_id,
+      returned_at: formatDateTimeString(new Date()),
+    });
+    returnFormApi.resetValidate();
+  });
+}
+
+function openCancelDrawer(record: BorrowRecord) {
+  if (!canCancelReservation(record)) {
+    ElMessage.info('该记录不可取消预约');
+    return;
+  }
+  activeRecord.value = record;
+  cancelDrawerApi.open();
+}
+
+function openDetail(record: BorrowRecord) {
+  detailRecord.value = record;
+  detailOpen.value = true;
+}
+
+function onDetailClosed() {
+  detailRecord.value = null;
+}
+
+async function tryBorrow(values: Record<string, any>) {
+  const isbn = String(values.isbn ?? '').trim();
+  const username = String(values.username ?? '').trim();
+  const bookId = String(values.book_id ?? '').trim();
+  const bookTitle = String(values.book_title ?? '').trim();
+  const borrowedAt = String(values.borrowed_at ?? '').trim();
+  const borrowDays = Number(values.borrow_days ?? 0);
+  const returnDueAt = String(values.return_due_at ?? '').trim();
+
+  if (!bookId || !bookTitle) {
+    ElMessage.warning('请先查询 ISBN 获取图书信息');
+    return false;
+  }
+
+  try {
+    await ElMessageBox.confirm(`确认为 ${username} 办理《${bookTitle}》借书？`, '二次确认', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+  } catch {
+    return false;
+  }
+
+  try {
+    await borrowBookApi({
+      borrow_days: borrowDays,
+      borrowed_at: borrowedAt,
+      isbn,
+      return_due_at: returnDueAt,
+      username,
+    });
+    ElMessage.success('借书成功');
+    refresh();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function tryConfirmBorrow(values: Record<string, any>) {
+  const record = activeRecord.value;
+  if (!record) return false;
+
+  try {
+    await ElMessageBox.confirm(`确认将《${record.book_title}》办理借出？`, '二次确认', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+  } catch {
+    return false;
+  }
+
+  try {
+    await borrowBookApi({
+      borrow_days: Number(values.borrow_days ?? 0),
+      borrowed_at: String(values.borrowed_at ?? '').trim(),
+      isbn: record.isbn,
+      return_due_at: String(values.return_due_at ?? '').trim(),
+      username: record.username,
+    });
+    ElMessage.success('确认借出成功');
+    refresh();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function tryReturn(values: Record<string, any>) {
+  const record = activeRecord.value;
+  if (!record) return false;
+
+  try {
+    await ElMessageBox.confirm(`确认办理《${record.book_title}》还书？`, '二次确认', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+  } catch {
+    return false;
+  }
+
+  try {
+    await returnBookApi(record.record_id, {
+      fine_amount: Number(values.fine_amount ?? 0),
+      returned_at: String(values.returned_at ?? '').trim(),
+    });
+    ElMessage.success('还书成功');
+    refresh();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function onConfirmCancel() {
+  const record = activeRecord.value;
+  if (!record || !canCancelReservation(record)) return;
+
+  try {
+    await ElMessageBox.confirm(`确认取消《${record.book_title}》的预约？`, '二次确认', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+  } catch {
+    return;
+  }
+
+  cancelingRecordId.value = record.record_id;
+  cancelDrawerApi.setState({ confirmLoading: true, submitting: true });
+  try {
+    await cancelBorrowReservationApi(record.record_id);
+    cancelDrawerApi.close();
+    ElMessage.success('取消预约成功');
+    refresh();
+  } catch {
+    return;
+  } finally {
+    cancelDrawerApi.setState({ confirmLoading: false, submitting: false });
+    cancelingRecordId.value = '';
+  }
+}
+
+async function handleBorrowSubmit(values: Record<string, any>) {
+  await tryBorrow(values);
+}
+
+async function handleConfirmBorrowSubmit(values: Record<string, any>) {
+  await tryConfirmBorrow(values);
+}
+
+async function handleReturnSubmit(values: Record<string, any>) {
+  await tryReturn(values);
+}
+
+async function onDrawerConfirm() {
+  if (drawerMode.value === 'borrow') {
+    const { valid } = await borrowFormApi.validate();
+    if (!valid) return;
+    const ok = await tryBorrow(await borrowFormApi.getValues());
+    if (ok) drawerApi.close();
+    return;
+  }
+
+  if (drawerMode.value === 'confirm-borrow') {
+    const { valid } = await confirmBorrowFormApi.validate();
+    if (!valid) return;
+    const ok = await tryConfirmBorrow(await confirmBorrowFormApi.getValues());
+    if (ok) drawerApi.close();
+    return;
+  }
+
+  const { valid } = await returnFormApi.validate();
+  if (!valid) return;
+  const ok = await tryReturn(await returnFormApi.getValues());
+  if (ok) drawerApi.close();
 }
 </script>
 
@@ -720,38 +934,86 @@ function statusLabel(status: BorrowStatus) {
     <Drawer>
       <template #default>
         <div class="space-y-4">
-          <div v-if="drawerMode === 'borrow'">
-            <BorrowForm />
-          </div>
-          <div v-else>
-            <ElDescriptions v-if="activeRecord" :column="2" border>
-              <ElDescriptionsItem label="借阅记录ID">
-                {{ activeRecord.record_id }}
-              </ElDescriptionsItem>
-              <ElDescriptionsItem label="用户名">
-                {{ activeRecord.username }}
-              </ElDescriptionsItem>
-              <ElDescriptionsItem label="ISBN">
-                {{ activeRecord.isbn }}
-              </ElDescriptionsItem>
-              <ElDescriptionsItem label="书名">
-                {{ activeRecord.book_title }}
-              </ElDescriptionsItem>
-              <ElDescriptionsItem label="借出时间">
-                {{ activeRecord.borrow_date }}
-              </ElDescriptionsItem>
-              <ElDescriptionsItem label="应还时间">
-                {{ activeRecord.due_date }}
-              </ElDescriptionsItem>
-            </ElDescriptions>
+          <ElDescriptions v-if="activeRecord" :column="2" border>
+            <ElDescriptionsItem label="借阅记录ID">
+              {{ activeRecord.record_id }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="状态">
+              <ElTag :type="statusTagType(activeRecord.status)">
+                {{ statusLabel(activeRecord.status) }}
+              </ElTag>
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="用户名">
+              {{ activeRecord.username }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="ISBN">
+              {{ activeRecord.isbn }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="书名">
+              {{ activeRecord.book_title }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="预约时间">
+              {{ displayTime(activeRecord.reserved_at) }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="待取截止时间">
+              {{ displayTime(activeRecord.pickup_due_at) }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="借出时间">
+              {{ displayTime(activeRecord.borrowed_at) }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="应还时间">
+              {{ displayTime(activeRecord.return_due_at) }}
+            </ElDescriptionsItem>
+          </ElDescriptions>
 
-            <div class="pt-2">
-              <ReturnForm />
-            </div>
-          </div>
+          <BorrowForm v-if="drawerMode === 'borrow'" />
+          <ConfirmBorrowForm v-else-if="drawerMode === 'confirm-borrow'" />
+          <ReturnForm v-else />
         </div>
       </template>
     </Drawer>
+
+    <CancelDrawer>
+      <template #footer>
+        <ElButton
+          :disabled="!activeRecord || !canCancelReservation(activeRecord) || !!cancelingRecordId"
+          :loading="!!activeRecord && cancelingRecordId === activeRecord.record_id"
+          type="danger"
+          @click="onConfirmCancel"
+        >
+          确认取消预约
+        </ElButton>
+      </template>
+
+      <ElDescriptions v-if="activeRecord" :column="2" border>
+        <ElDescriptionsItem label="借阅记录ID">
+          {{ activeRecord.record_id }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="状态">
+          <ElTag :type="statusTagType(activeRecord.status)">
+            {{ statusLabel(activeRecord.status) }}
+          </ElTag>
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="用户名">
+          {{ activeRecord.username }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="ISBN">
+          {{ activeRecord.isbn }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="书名">
+          {{ activeRecord.book_title }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="预约时间">
+          {{ displayTime(activeRecord.reserved_at) }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="待取截止时间">
+          {{ displayTime(activeRecord.pickup_due_at) }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="实际归还时间">
+          {{ displayTime(activeRecord.returned_at) }}
+        </ElDescriptionsItem>
+      </ElDescriptions>
+    </CancelDrawer>
 
     <Grid table-title="借阅记录">
       <template #toolbar-tools>
@@ -759,14 +1021,49 @@ function statusLabel(status: BorrowStatus) {
       </template>
 
       <template #status="{ row }">
-        <ElTag :type="statusTagType(getEffectiveStatus(row))">
-          {{ statusLabel(getEffectiveStatus(row)) }}
+        <ElTag :type="statusTagType(row.status)">
+          {{ statusLabel(row.status) }}
         </ElTag>
+      </template>
+
+      <template #reservedAt="{ row }">
+        {{ displayReservedAt(row) }}
+      </template>
+
+      <template #pickupDueAt="{ row }">
+        {{ displayPickupDueAt(row) }}
+      </template>
+
+      <template #borrowedAt="{ row }">
+        {{ displayBorrowedAt(row) }}
+      </template>
+
+      <template #returnDueAt="{ row }">
+        {{ displayReturnDueAt(row) }}
+      </template>
+
+      <template #returnedAt="{ row }">
+        {{ displayReturnedAt(row) }}
       </template>
 
       <template #actions="{ row }">
         <div class="flex items-center justify-center gap-2">
-          <ElButton link type="primary" @click="openDetail(row)">详情</ElButton>
+          <ElButton
+            v-if="canConfirmBorrow(row)"
+            link
+            type="primary"
+            @click="openConfirmBorrowDrawer(row)"
+          >
+            确认借出
+          </ElButton>
+          <ElButton
+            v-if="canCancelReservation(row)"
+            link
+            type="danger"
+            @click="openCancelDrawer(row)"
+          >
+            取消预约
+          </ElButton>
           <ElButton
             v-if="canReturn(row)"
             link
@@ -775,18 +1072,21 @@ function statusLabel(status: BorrowStatus) {
           >
             还书
           </ElButton>
+          <ElButton v-if="canViewDetail(row)" link type="primary" @click="openDetail(row)">
+            详情
+          </ElButton>
         </div>
       </template>
     </Grid>
 
-    <ElDialog v-model="detailOpen" title="借阅详情" width="720px" @closed="onDetailClosed">
+    <ElDialog v-model="detailOpen" title="借阅详情" width="820px" @closed="onDetailClosed">
       <ElDescriptions v-if="detailRecord" :column="2" border>
         <ElDescriptionsItem label="借阅记录ID">
           {{ detailRecord.record_id }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="状态">
-          <ElTag :type="statusTagType(getEffectiveStatus(detailRecord))">
-            {{ statusLabel(getEffectiveStatus(detailRecord)) }}
+          <ElTag :type="statusTagType(detailRecord.status)">
+            {{ statusLabel(detailRecord.status) }}
           </ElTag>
         </ElDescriptionsItem>
         <ElDescriptionsItem label="用户ID">
@@ -807,14 +1107,20 @@ function statusLabel(status: BorrowStatus) {
         <ElDescriptionsItem label="借阅期限（天）">
           {{ detailRecord.borrow_days }}
         </ElDescriptionsItem>
+        <ElDescriptionsItem label="预约时间">
+          {{ displayTime(detailRecord.reserved_at) }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="待取截止时间">
+          {{ displayTime(detailRecord.pickup_due_at) }}
+        </ElDescriptionsItem>
         <ElDescriptionsItem label="借出时间">
-          {{ detailRecord.borrow_date }}
+          {{ displayTime(detailRecord.borrowed_at) }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="应还时间">
-          {{ detailRecord.due_date }}
+          {{ displayTime(detailRecord.return_due_at) }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="实际归还时间">
-          {{ detailRecord.return_date || '-' }}
+          {{ displayTime(detailRecord.returned_at) }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="罚金">
           {{ detailRecord.fine_amount }}

@@ -130,28 +130,26 @@ function normalizeRange(range: unknown) {
 
 function statusLabel(status: BorrowStatus) {
   if (status === 'borrowed') return '借阅中';
+  if (status === 'borrow_overdue') return '借阅逾期';
   if (status === 'returned') return '已归还';
-  if (status === 'overdue') return '逾期';
   if (status === 'reserved') return '待取书';
+  if (status === 'reserve_overdue') return '待取超期';
   if (status === 'canceled') return '已取消';
   return status;
 }
 
 function statusTagType(status: BorrowStatus) {
   if (status === 'borrowed') return 'success';
+  if (status === 'borrow_overdue') return 'danger';
   if (status === 'returned') return 'info';
-  if (status === 'overdue') return 'danger';
   if (status === 'reserved') return 'warning';
+  if (status === 'reserve_overdue') return 'danger';
   if (status === 'canceled') return 'info';
   return 'info';
 }
 
 function canCancel(row: BorrowRecord) {
-  return (
-    row.raw_status === 'reserved' &&
-    !row.return_date &&
-    row.status !== 'canceled'
-  );
+  return (row.status === 'reserved' || row.status === 'reserve_overdue') && !row.returned_at;
 }
 
 function canCancelActiveRecord() {
@@ -176,9 +174,10 @@ async function loadBookByIsbn(isbn: string) {
 const STATUS_OPTIONS: Array<{ label: string; value: BorrowStatus | 'all' }> = [
   { label: '全部', value: 'all' },
   { label: '借阅中', value: 'borrowed' },
+  { label: '借阅逾期', value: 'borrow_overdue' },
   { label: '已归还', value: 'returned' },
-  { label: '逾期', value: 'overdue' },
   { label: '待取书', value: 'reserved' },
+  { label: '待取超期', value: 'reserve_overdue' },
   { label: '已取消', value: 'canceled' },
 ];
 
@@ -218,7 +217,7 @@ const gridFormOptions: VbenFormProps = {
         valueFormat: 'YYYY-MM-DD',
       },
       fieldName: 'borrow_date_range',
-      label: '借出时间',
+      label: '预约/借出时间',
     },
   ],
   showCollapseButton: true,
@@ -238,18 +237,18 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
       field: 'borrow_date',
       formatter: 'formatDateTime',
       sortable: true,
-      title: '借出时间',
+      title: '预约/借出时间',
       width: 180,
     },
     {
       field: 'due_date',
       formatter: 'formatDateTime',
       sortable: true,
-      title: '截止/应还时间',
+      title: '待取/应还时间',
       width: 180,
     },
     {
-      field: 'return_date',
+      field: 'returned_at',
       formatter: 'formatDateTime',
       title: '归还时间',
       width: 180,
@@ -461,11 +460,11 @@ async function onConfirmCancel() {
           <ElDescriptionsItem label="借出时间">
             {{ activeRecord.borrow_date }}
           </ElDescriptionsItem>
-          <ElDescriptionsItem label="截止/应还时间">
+          <ElDescriptionsItem label="待取/应还时间">
             {{ activeRecord.due_date }}
           </ElDescriptionsItem>
           <ElDescriptionsItem label="归还时间">
-            {{ activeRecord.return_date || '（无）' }}
+            {{ activeRecord.returned_at || '（无）' }}
           </ElDescriptionsItem>
           <ElDescriptionsItem label="罚金">
             {{ activeRecord.fine_amount ?? 0 }}

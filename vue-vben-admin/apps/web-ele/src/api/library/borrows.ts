@@ -2,9 +2,10 @@ import { requestClient } from '#/api/request';
 
 export namespace BorrowsApi {
   export type BorrowStatus =
+    | 'borrow_overdue'
     | 'borrowed'
     | 'canceled'
-    | 'overdue'
+    | 'reserve_overdue'
     | 'reserved'
     | 'returned';
 
@@ -13,12 +14,16 @@ export namespace BorrowsApi {
     book_title: string;
     borrow_date: string;
     borrow_days: number;
+    borrowed_at?: string;
     due_date: string;
     fine_amount: number;
     isbn: string;
-    raw_status?: BorrowStatus;
+    pickup_due_at?: string;
     record_id: string;
+    reserved_at?: string;
     return_date?: string;
+    return_due_at?: string;
+    returned_at?: string;
     status: BorrowStatus;
     user_id: string;
     username: string;
@@ -37,23 +42,35 @@ export namespace BorrowsApi {
     pageSize?: number;
     returnEnd?: number;
     returnStart?: number;
-    sortBy?: 'borrow_date' | 'due_date';
+    sortBy?:
+      | 'borrow_date'
+      | 'borrowed_at'
+      | 'created_at'
+      | 'due_date'
+      | 'pickup_due_at'
+      | 'reserved_at'
+      | 'return_date'
+      | 'return_due_at'
+      | 'returned_at';
     sortOrder?: 'asc' | 'desc';
     status?: BorrowStatus | 'all';
     username?: string;
   }
 
   export interface BorrowBody {
-    borrow_date: string;
+    borrow_date?: string;
     borrow_days: number;
-    due_date: string;
+    borrowed_at?: string;
+    due_date?: string;
     isbn: string;
+    return_due_at?: string;
     username: string;
   }
 
   export interface ReturnBody {
     fine_amount: number;
-    return_date: string;
+    return_date?: string;
+    returned_at?: string;
   }
 
   export interface BorrowResult {
