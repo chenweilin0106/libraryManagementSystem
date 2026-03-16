@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { ObjectId } from 'mongodb';
 
 import { hashPassword } from '../utils/crypto.js';
+import { migrateBorrowRecords } from '../utils/borrow-record.js';
 
 import { booksCol, borrowsCol, sessionsCol, usersCol, type UserRole } from './collections.js';
 import { seedDemoDataIfEmpty } from './seed-demo.js';
@@ -125,21 +126,25 @@ async function ensureUser(username: string, role: UserRole) {
 
 export async function bootstrapMongo() {
   await backfillUserPhones();
+  await ensureUser('admin', 'admin');
+  await ensureUser('vben', 'super');
+
+  await seedDemoDataIfEmpty();
+  await migrateBorrowRecords();
+
   await usersCol().createIndex({ username_lower: 1 }, { unique: true });
   await usersCol().createIndex({ phone: 1 }, { unique: true });
   await booksCol().createIndex({ isbn: 1 }, { unique: true });
   await borrowsCol().createIndex({ record_id: 1 }, { unique: true });
-  await borrowsCol().createIndex({ username: 1, isbn: 1, return_date: 1 });
-  await borrowsCol().createIndex({ borrow_date: 1 });
-  await borrowsCol().createIndex({ return_date: 1 });
+  await borrowsCol().createIndex({ username: 1, isbn: 1, returned_at: 1 });
+  await borrowsCol().createIndex({ status: 1, pickup_due_at: 1 });
+  await borrowsCol().createIndex({ status: 1, return_due_at: 1 });
+  await borrowsCol().createIndex({ reserved_at: 1 });
+  await borrowsCol().createIndex({ borrowed_at: 1 });
+  await borrowsCol().createIndex({ returned_at: 1 });
 
   await sessionsCol().createIndex({ access_token: 1 }, { unique: true });
   await sessionsCol().createIndex({ refresh_token: 1 }, { unique: true });
   await sessionsCol().createIndex({ user_id: 1 });
   await sessionsCol().createIndex({ refresh_expires_at: 1 }, { expireAfterSeconds: 0 });
-
-  await ensureUser('admin', 'admin');
-  await ensureUser('vben', 'super');
-
-  await seedDemoDataIfEmpty();
 }

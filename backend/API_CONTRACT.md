@@ -498,10 +498,12 @@ Query：
 - `page`, `pageSize`
 - `username?`
 - `isbn?`
-- `status?`: `'all' | 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled'`
+- `status?`: `'all' | 'reserved' | 'reserve_overdue' | 'borrowed' | 'borrow_overdue' | 'returned' | 'canceled'`
 - `borrowStart?`, `borrowEnd?`（毫秒）
 - `returnStart?`, `returnEnd?`（毫秒）
-- `sortBy?`: `'borrow_date' | 'due_date'`（可选，默认 `borrow_date`）
+- `sortBy?`:
+  - 兼容字段：`'borrow_date' | 'due_date' | 'return_date'`
+  - 新字段：`'reserved_at' | 'pickup_due_at' | 'borrowed_at' | 'return_due_at' | 'returned_at' | 'created_at'`
 - `sortOrder?`: `'asc' | 'desc'`（可选，默认 `desc`）
 
 返回记录结构（data 解包后）：
@@ -514,11 +516,22 @@ type BorrowRecord = {
   book_id: string;
   isbn: string;
   book_title: string;
-  raw_status: 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled'; // 数据库原始状态
-  status: 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled';
-  borrow_date: string;        // 'YYYY-MM-DD HH:mm:ss'
-  due_date: string;           // 'YYYY-MM-DD HH:mm:ss'
-  return_date?: string;       // 'YYYY-MM-DD HH:mm:ss'
+  status:
+    | 'reserved'
+    | 'reserve_overdue'
+    | 'borrowed'
+    | 'borrow_overdue'
+    | 'returned'
+    | 'canceled';
+  reserved_at?: string;       // 'YYYY-MM-DD HH:mm:ss'
+  pickup_due_at?: string;     // 'YYYY-MM-DD HH:mm:ss'
+  borrowed_at?: string;       // 'YYYY-MM-DD HH:mm:ss'
+  return_due_at?: string;     // 'YYYY-MM-DD HH:mm:ss'
+  returned_at?: string;       // 'YYYY-MM-DD HH:mm:ss'
+  // 兼容字段：供旧页面/旧查询逻辑复用
+  borrow_date: string;        // reserved_at 或 borrowed_at
+  due_date: string;           // pickup_due_at 或 return_due_at
+  return_date?: string;       // returned_at
   borrow_days: number;
   fine_amount: number;
 };
@@ -540,7 +553,7 @@ Query：
 
 - `page`, `pageSize`
 - `isbn?`
-- `status?`: `'all' | 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled'`
+- `status?`: `'all' | 'reserved' | 'reserve_overdue' | 'borrowed' | 'borrow_overdue' | 'returned' | 'canceled'`
 - `borrowStart?`, `borrowEnd?`（毫秒）
 - `returnStart?`, `returnEnd?`（毫秒）
 
@@ -559,9 +572,12 @@ Body：
 type BorrowBookBody = {
   isbn: string;
   username: string;
-  borrow_date?: string;  // 可为空/可省略则后端补当前时间
+  borrowed_at?: string;  // 可为空/可省略则后端补当前时间
   borrow_days?: number;  // 可为空/可省略则默认 30
-  due_date?: string;     // 可为空/可省略则后端自行生成/回填
+  return_due_at?: string; // 可为空/可省略则后端自行生成/回填
+  // 兼容旧字段：
+  borrow_date?: string;
+  due_date?: string;
 };
 ```
 
@@ -575,10 +591,21 @@ type BorrowRecord = {
   book_id: string;
   isbn: string;
   book_title: string;
-  status: 'borrowed' | 'returned' | 'overdue' | 'reserved' | 'canceled';
-  borrow_date: string;        // 'YYYY-MM-DD HH:mm:ss'
-  due_date: string;           // 'YYYY-MM-DD HH:mm:ss'
-  return_date?: string;       // 'YYYY-MM-DD HH:mm:ss'
+  status:
+    | 'reserved'
+    | 'reserve_overdue'
+    | 'borrowed'
+    | 'borrow_overdue'
+    | 'returned'
+    | 'canceled';
+  reserved_at?: string;
+  pickup_due_at?: string;
+  borrowed_at?: string;
+  return_due_at?: string;
+  returned_at?: string;
+  borrow_date: string;
+  due_date: string;
+  return_date?: string;
   borrow_days: number;
   fine_amount: number;
 };
@@ -604,6 +631,7 @@ type BorrowBookResponseData = {
 
 补充约定（预约取书）：
 - 若同一用户同一本书存在“待取书（reserved）且未取消/未归还”记录，则本接口会将该记录转为 `borrowed`（不重复扣库存）。
+- 若同一用户同一本书存在“待取超期（reserve_overdue）”记录，则本接口拒绝确认借出，需先取消预约。
 
 ### 4.2.1 预约（用户端）
 
@@ -633,9 +661,10 @@ type ReserveBookBody = {
 
 权限：
 - 登录用户可用（仅允许取消自己的记录）
+- 管理员可取消任意 `reserved / reserve_overdue` 记录
 
 业务约束：
-- 仅 `raw_status='reserved'` 的记录允许取消（409）
+- 仅 `status='reserved' | 'reserve_overdue'` 的记录允许取消（409）
 - 取消成功需要**回补库存**（`current_stock + 1`，不超过 `total_stock`）
 
 成功返回：`BorrowRecord`
@@ -651,15 +680,18 @@ Body：
 
 ```ts
 type ReturnBookBody = {
-  return_date?: string; // 可为空/可省略则后端补当前时间
+  returned_at?: string; // 可为空/可省略则后端补当前时间
   fine_amount: number;
+  // 兼容旧字段：
+  return_date?: string;
 };
 ```
 
 业务约束：
 
 - 记录不存在（404）
-- 记录不可还（例如已归还）返回冲突（409）
+- `reserved / reserve_overdue` 记录不可直接还书（409）
+- 记录不可还（例如已归还/已取消）返回冲突（409）
 - 还书成功需要**回补库存**（`current_stock + 1`，不超过 `total_stock`）
 
 ---

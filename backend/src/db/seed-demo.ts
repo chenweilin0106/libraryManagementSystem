@@ -292,15 +292,20 @@ export async function seedDemoDataIfEmpty() {
       user: UserDoc;
       book: BookDoc;
       status: BorrowDoc['status'];
-      borrow_date: Date;
-      due_date: Date;
-      return_date?: Date;
+      reserved_at?: Date;
+      pickup_due_at?: Date;
+      borrowed_at?: Date;
+      return_due_at?: Date;
+      returned_at?: Date;
       borrow_days: number;
       fine_amount: number;
     }) {
       const recordId = new ObjectId();
-      const created_at = input.borrow_date;
-      const updated_at = input.return_date ?? input.borrow_date;
+      const borrow_date = input.borrowed_at ?? input.reserved_at ?? new Date();
+      const due_date = input.return_due_at ?? input.pickup_due_at ?? new Date();
+      const return_date = input.returned_at;
+      const created_at = input.reserved_at ?? input.borrowed_at ?? borrow_date;
+      const updated_at = input.returned_at ?? input.borrowed_at ?? input.reserved_at ?? borrow_date;
       docs.push({
         _id: recordId,
         record_id: recordId.toHexString(),
@@ -310,9 +315,14 @@ export async function seedDemoDataIfEmpty() {
         isbn: input.book.isbn,
         book_title: input.book.title,
         status: input.status,
-        borrow_date: input.borrow_date,
-        due_date: input.due_date,
-        return_date: input.return_date,
+        reserved_at: input.reserved_at,
+        pickup_due_at: input.pickup_due_at,
+        borrowed_at: input.borrowed_at,
+        return_due_at: input.return_due_at,
+        returned_at: input.returned_at,
+        borrow_date,
+        due_date,
+        return_date,
         borrow_days: input.borrow_days,
         fine_amount: input.fine_amount,
         created_at,
@@ -328,7 +338,15 @@ export async function seedDemoDataIfEmpty() {
       const borrow_days = 30;
       const due_date = new Date(borrow_date.getTime() + borrow_days * dayMs);
       activePairs.add(`${u._id}:${b.isbn}`);
-      addRecord({ user: u, book: b, status: 'borrowed', borrow_date, due_date, borrow_days, fine_amount: 0 });
+      addRecord({
+        user: u,
+        book: b,
+        status: 'borrowed',
+        borrowed_at: borrow_date,
+        return_due_at: due_date,
+        borrow_days,
+        fine_amount: 0,
+      });
     }
     {
       const u = userList[1] ?? userList[0]!;
@@ -337,7 +355,16 @@ export async function seedDemoDataIfEmpty() {
       const borrow_days = 14;
       const due_date = new Date(borrow_date.getTime() + borrow_days * dayMs);
       const return_date = new Date(borrow_date.getTime() + 10 * dayMs);
-      addRecord({ user: u, book: b, status: 'returned', borrow_date, due_date, return_date, borrow_days, fine_amount: 0 });
+      addRecord({
+        user: u,
+        book: b,
+        status: 'returned',
+        borrowed_at: borrow_date,
+        return_due_at: due_date,
+        returned_at: return_date,
+        borrow_days,
+        fine_amount: 0,
+      });
     }
     {
       // 逾期未归还：用于测试借书限制（fine_amount > 0）
@@ -347,7 +374,15 @@ export async function seedDemoDataIfEmpty() {
       const borrow_days = 7;
       const due_date = new Date(borrow_date.getTime() + borrow_days * dayMs);
       activePairs.add(`${u._id}:${b.isbn}`);
-      addRecord({ user: u, book: b, status: 'borrowed', borrow_date, due_date, borrow_days, fine_amount: 10 });
+      addRecord({
+        user: u,
+        book: b,
+        status: 'borrow_overdue',
+        borrowed_at: borrow_date,
+        return_due_at: due_date,
+        borrow_days,
+        fine_amount: 10,
+      });
     }
     {
       const u = userList[3] ?? userList[0]!;
@@ -356,7 +391,15 @@ export async function seedDemoDataIfEmpty() {
       const borrow_days = 3;
       const due_date = new Date(borrow_date.getTime() + borrow_days * dayMs);
       activePairs.add(`${u._id}:${b.isbn}`);
-      addRecord({ user: u, book: b, status: 'reserved', borrow_date, due_date, borrow_days, fine_amount: 0 });
+      addRecord({
+        user: u,
+        book: b,
+        status: 'reserved',
+        reserved_at: borrow_date,
+        pickup_due_at: due_date,
+        borrow_days,
+        fine_amount: 0,
+      });
     }
     {
       const u = userList[4] ?? userList[0]!;
@@ -364,7 +407,15 @@ export async function seedDemoDataIfEmpty() {
       const borrow_date = new Date(base.getTime() - 10 * dayMs);
       const borrow_days = 14;
       const due_date = new Date(borrow_date.getTime() + borrow_days * dayMs);
-      addRecord({ user: u, book: b, status: 'canceled', borrow_date, due_date, borrow_days, fine_amount: 0 });
+      addRecord({
+        user: u,
+        book: b,
+        status: 'canceled',
+        reserved_at: borrow_date,
+        pickup_due_at: due_date,
+        borrow_days,
+        fine_amount: 0,
+      });
     }
 
     // 批量生成更多记录（尽量分散到不同用户/不同图书），尽量补齐到 80 条
@@ -402,10 +453,17 @@ export async function seedDemoDataIfEmpty() {
       addRecord({
         user,
         book,
-        status,
-        borrow_date,
-        due_date,
-        return_date,
+        status:
+          return_date
+            ? 'returned'
+            : status === 'reserved'
+              ? (willBeOverdue ? 'reserve_overdue' : 'reserved')
+              : (willBeOverdue ? 'borrow_overdue' : 'borrowed'),
+        reserved_at: status === 'reserved' || status === 'canceled' ? borrow_date : undefined,
+        pickup_due_at: status === 'reserved' || status === 'canceled' ? due_date : undefined,
+        borrowed_at: status === 'borrowed' ? borrow_date : undefined,
+        return_due_at: status === 'borrowed' ? due_date : undefined,
+        returned_at: return_date,
         borrow_days,
         fine_amount,
       });

@@ -120,8 +120,9 @@ function getEffectiveBorrowStatus(record: {
   status?: string;
 }) {
   if (record.status === 'canceled') return 'canceled';
-  if (record.return_date) return 'returned';
+  if (record.return_date || record.status === 'returned') return 'returned';
   if (record.status === 'reserved') return 'reserved';
+  if (record.status === 'reserve_overdue' || record.status === 'borrow_overdue') return 'overdue';
   const dueMs = toMsLocal(record.due_date);
   if (dueMs !== null && Date.now() > dueMs) return 'overdue';
   return 'borrowed';

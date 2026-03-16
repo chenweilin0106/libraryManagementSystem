@@ -36,10 +36,11 @@ export type BookDoc = {
 };
 
 export type BorrowStatus =
-  | 'borrowed'
-  | 'returned'
-  | 'overdue'
   | 'reserved'
+  | 'reserve_overdue'
+  | 'borrowed'
+  | 'borrow_overdue'
+  | 'returned'
   | 'canceled';
 
 export type BorrowDoc = {
@@ -51,8 +52,13 @@ export type BorrowDoc = {
   isbn: string;
   book_title: string;
   status: BorrowStatus;
-  borrow_date: Date;
-  due_date: Date;
+  reserved_at?: Date;
+  pickup_due_at?: Date;
+  borrowed_at?: Date;
+  return_due_at?: Date;
+  returned_at?: Date;
+  borrow_date?: Date;
+  due_date?: Date;
   return_date?: Date;
   borrow_days: number;
   fine_amount: number;

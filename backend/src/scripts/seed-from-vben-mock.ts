@@ -36,11 +36,16 @@ type MockBorrow = {
   book_title: string;
   borrow_date: string;
   borrow_days: number;
+  borrowed_at?: string;
   due_date: string;
   fine_amount: number;
   isbn: string;
+  pickup_due_at?: string;
   record_id: string;
+  reserved_at?: string;
   return_date?: string;
+  return_due_at?: string;
+  returned_at?: string;
   status: BorrowDoc['status'];
   user_id: string;
   username: string;
@@ -422,7 +427,7 @@ function buildMockBorrows(input: {
         fine_amount: 10,
         isbn,
         record_id: buildRecordId(seq++),
-        status: 'borrowed',
+        status: 'borrow_overdue',
         user_id: u1._id,
         username: u1.username,
       });
@@ -512,9 +517,24 @@ function buildMockBorrows(input: {
       due_date: formatDateTimeString(dueDate),
       fine_amount,
       isbn,
+      pickup_due_at:
+        status === 'reserved' || status === 'canceled' ? formatDateTimeString(dueDate) : undefined,
       record_id: buildRecordId(seq2),
+      reserved_at:
+        status === 'reserved' || status === 'canceled'
+          ? formatDateTimeString(borrowDate)
+          : undefined,
       return_date: returnDate ? formatDateTimeString(returnDate) : undefined,
-      status: isReturned ? 'returned' : status,
+      return_due_at:
+        status === 'borrowed' ? formatDateTimeString(dueDate) : undefined,
+      returned_at: returnDate ? formatDateTimeString(returnDate) : undefined,
+      borrowed_at:
+        status === 'borrowed' ? formatDateTimeString(borrowDate) : undefined,
+      status: isReturned
+        ? 'returned'
+        : status === 'reserved'
+          ? (willBeOverdue ? 'reserve_overdue' : 'reserved')
+          : (willBeOverdue ? 'borrow_overdue' : status),
       user_id: user?._id ?? 'U-UNKNOWN',
       username: user?.username ?? 'unknown',
     } satisfies MockBorrow;
@@ -620,6 +640,11 @@ async function main() {
         isbn: toText(r.isbn),
         book_title: toText(r.book_title),
         status: r.status,
+        reserved_at: r.reserved_at ? toDateLocal(r.reserved_at) : undefined,
+        pickup_due_at: r.pickup_due_at ? toDateLocal(r.pickup_due_at) : undefined,
+        borrowed_at: r.borrowed_at ? toDateLocal(r.borrowed_at) : undefined,
+        return_due_at: r.return_due_at ? toDateLocal(r.return_due_at) : undefined,
+        returned_at: r.returned_at ? toDateLocal(r.returned_at) : returnDate,
         borrow_date: borrowDate,
         due_date: toDateLocal(r.due_date),
         return_date: returnDate,
