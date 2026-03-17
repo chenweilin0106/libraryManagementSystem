@@ -401,7 +401,7 @@ async function onConfirmCancel() {
   if (!canCancel(record)) return;
 
   try {
-    await ElMessageBox.confirm(`确认取消预约《${record.book_title}》？`, '二次确认', {
+    await ElMessageBox.confirm(`确认取消预约《${record.book_title}》？`, '确认取消预约', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning',
