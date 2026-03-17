@@ -311,7 +311,7 @@ async function onConfirmReserve() {
   if (!canReserve(book)) return;
 
   try {
-    await ElMessageBox.confirm(`确认预约《${book.title}》？`, '二次确认', {
+    await ElMessageBox.confirm(`确认预约《${book.title}》？`, '确认办理预约', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning',

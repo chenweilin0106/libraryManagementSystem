@@ -782,7 +782,7 @@ async function tryBorrow(values: Record<string, any>) {
   }
 
   try {
-    await ElMessageBox.confirm(`确认为 ${username} 办理《${bookTitle}》借书？`, '二次确认', {
+    await ElMessageBox.confirm(`确认为 ${username} 办理《${bookTitle}》借书？`, '确认办理借书', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning',
@@ -812,7 +812,7 @@ async function tryConfirmBorrow(values: Record<string, any>) {
   if (!record) return false;
 
   try {
-    await ElMessageBox.confirm(`确认将《${record.book_title}》办理借出？`, '二次确认', {
+    await ElMessageBox.confirm(`确认将《${record.book_title}》办理借出？`, '确认办理借出', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning',
@@ -842,7 +842,7 @@ async function tryReturn(values: Record<string, any>) {
   if (!record) return false;
 
   try {
-    await ElMessageBox.confirm(`确认办理《${record.book_title}》还书？`, '二次确认', {
+    await ElMessageBox.confirm(`确认办理《${record.book_title}》还书？`, '确认办理还书', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning',
@@ -869,7 +869,7 @@ async function onConfirmCancel() {
   if (!record || !canCancelReservation(record)) return;
 
   try {
-    await ElMessageBox.confirm(`确认取消《${record.book_title}》的预约？`, '二次确认', {
+    await ElMessageBox.confirm(`确认取消《${record.book_title}》的预约？`, '确认取消预约', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning',
