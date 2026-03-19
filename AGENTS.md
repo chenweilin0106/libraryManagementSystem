@@ -147,6 +147,17 @@
 - 必须明确询问我是否需要将当前分支合并到 `main`/`master`，不要默认执行分支合并。
 - 未经我明确确认，不要主动执行远程推送、合并分支、删除远程分支等操作。
 
+### Windows 下 `git push` 常见问题（Codex/自动化环境）
+- 现象 1（SSH）：`ssh.exe: fatal error - couldn't create signal pipe, Win32 error 5`
+  - 背景：Git for Windows 自带的 `C:\\Program Files\\Git\\usr\\bin\\ssh.exe`（MSYS2 兼容层）在某些受限/非交互环境中可能无法创建内部信号管道而失败。
+  - 推荐修复：让 Git 改用系统原生 OpenSSH：
+    - `git config --global core.sshCommand "C:/Windows/System32/OpenSSH/ssh.exe"`
+    - 验证：`git config --global core.sshCommand`、`ssh -V`
+    - 回退：`git config --global --unset core.sshCommand`
+- 现象 2（HTTPS）：`schannel: ... SEC_E_NO_CREDENTIALS`
+  - 背景：系统凭据（GCM/Token）在自动化环境里不可用或未配置。
+  - 处理：用交互式终端重新登录 Git 凭据，或改用 SSH key/agent 方案。
+
 ## 前端启动 + DevTools MCP（chrome-devtools）
 
 目标：方便让 Agent 启动 Element 前端，并用 MCP 自动打开浏览器进入页面做调试。
