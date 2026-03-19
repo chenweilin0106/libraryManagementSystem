@@ -64,6 +64,8 @@ const drawerMode = ref<'create' | 'edit'>('create');
 const drawerActiveTab = ref<'manual' | 'import'>('manual');
 const editingOriginalIsbn = ref<string | null>(null);
 const editingOriginalCoverUrl = ref<string | null>(null);
+const downShelfBook = ref<Book | null>(null);
+const downShelvingIsbn = ref<string>('');
 const uploadFileList = ref<any[]>([]);
 const coverPreviewUrl = ref<string>('');
 const coverPreviewOpen = ref(false);
@@ -270,12 +272,28 @@ const [BookForm, bookFormApi] = useVbenForm({
   wrapperClass: 'grid-cols-1',
 });
 
+const [ReadonlyBookForm, readonlyBookFormApi] = useVbenForm({
+  commonConfig: {
+    componentProps: {
+      class: 'w-full',
+    },
+    disabled: true,
+    hideRequiredMark: true,
+  },
+  layout: 'horizontal',
+  schema: bookFormSchema,
+  showDefaultActions: false,
+  wrapperClass: 'grid-cols-1',
+});
+
 const gridFormOptions: VbenFormProps = {
   collapsed: false,
   handleReset: async () => {
     await gridApi.formApi.resetForm();
     resetGridSortToDefault();
-    await gridApi.reload();
+    const formValues = await gridApi.formApi.getValues();
+    gridApi.formApi.setLatestSubmissionValues(formValues);
+    await gridApi.reload(formValues);
   },
   resetButtonOptions: { content: '重置' },
   schema: [
@@ -710,6 +728,22 @@ const [Drawer, drawerApi] = useVbenDrawer({
   },
 });
 
+const [DownShelfDrawer, downShelfDrawerApi] = useVbenDrawer({
+  cancelText: '取消',
+  confirmText: '确认下架',
+  destroyOnClose: true,
+  onCancel() {
+    downShelfDrawerApi.close();
+  },
+  onClosed() {
+    downShelfBook.value = null;
+    downShelvingIsbn.value = '';
+    readonlyBookFormApi.resetForm();
+  },
+  onConfirm: onConfirmDownShelf,
+  title: '下架图书',
+});
+
 watch(drawerConfirmText, (text) => {
   drawerApi.setState({ confirmText: text });
 });
@@ -792,10 +826,44 @@ function onEdit(row: Book) {
   });
 }
 
-async function onDownShelf(row: Book) {
+function onDownShelf(row: Book) {
   if (row.is_deleted) return;
+  downShelfBook.value = row;
+  downShelfDrawerApi.open();
+  nextTick(() => {
+    readonlyBookFormApi.resetForm();
+    readonlyBookFormApi.setValues(
+      {
+        author: row.author,
+        category: row.category,
+        cover_files: [
+          {
+            name: '封面',
+            status: 'success',
+            uid: row.isbn,
+            url: getTableCoverSrc(row),
+          } as any,
+        ],
+        current_stock: row.current_stock,
+        introduction: row.introduction ?? '',
+        isbn: row.isbn,
+        title: row.title,
+        total_stock: row.total_stock,
+      },
+      true,
+      false,
+    );
+  });
+}
+
+async function onConfirmDownShelf() {
+  const book = downShelfBook.value;
+  if (!book) return;
+  if (book.is_deleted) return;
+  if (downShelvingIsbn.value) return;
+
   try {
-    await ElMessageBox.confirm(`确定要下架《${row.title}》吗？`, '下架确认', {
+    await ElMessageBox.confirm(`确定要下架《${book.title}》吗？`, '确认下架', {
       confirmButtonText: '确认下架',
       cancelButtonText: '取消',
       type: 'warning',
@@ -804,9 +872,17 @@ async function onDownShelf(row: Book) {
     return;
   }
 
-  await setBookShelfApi(row.isbn, true);
-  ElMessage.success('已下架');
-  refresh();
+  downShelvingIsbn.value = book.isbn;
+  downShelfDrawerApi.setState({ confirmLoading: true });
+  try {
+    await setBookShelfApi(book.isbn, true);
+    ElMessage.success('已下架');
+    downShelfDrawerApi.close();
+    refresh();
+  } finally {
+    downShelfDrawerApi.setState({ confirmLoading: false });
+    downShelvingIsbn.value = '';
+  }
 }
 
 async function onUpShelf(row: Book) {
@@ -1006,6 +1082,25 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </Drawer>
+
+    <DownShelfDrawer>
+      <div class="mt-2">
+        <ReadonlyBookForm>
+          <template #cover_files="slotProps">
+            <ElUpload
+              v-bind="slotProps"
+              :auto-upload="false"
+              :disabled="true"
+              :limit="1"
+              accept="image/*"
+              list-type="picture-card"
+            >
+              <ElButton :disabled="true" type="primary">选择封面</ElButton>
+            </ElUpload>
+          </template>
+        </ReadonlyBookForm>
+      </div>
+    </DownShelfDrawer>
 
     <Grid table-title="图书列表">
       <template #toolbar-tools>

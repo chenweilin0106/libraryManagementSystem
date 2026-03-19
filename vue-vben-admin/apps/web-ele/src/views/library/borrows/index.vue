@@ -204,7 +204,9 @@ const gridFormOptions: VbenFormProps = {
   handleReset: async () => {
     await gridApi.formApi.resetForm();
     resetGridSortToDefault();
-    await gridApi.reload();
+    const formValues = await gridApi.formApi.getValues();
+    gridApi.formApi.setLatestSubmissionValues(formValues);
+    await gridApi.reload(formValues);
   },
   resetButtonOptions: { content: '重置' },
   schema: [
@@ -656,6 +658,8 @@ const [Drawer, drawerApi] = useVbenDrawer({
 });
 
 const [CancelDrawer, cancelDrawerApi] = useVbenDrawer({
+  cancelText: '取消',
+  confirmText: '确认取消预约',
   destroyOnClose: true,
   onCancel() {
     cancelDrawerApi.close();
@@ -664,6 +668,7 @@ const [CancelDrawer, cancelDrawerApi] = useVbenDrawer({
     activeRecord.value = null;
     cancelingRecordId.value = '';
   },
+  onConfirm: onConfirmCancel,
   title: '取消预约',
 });
 
@@ -974,17 +979,6 @@ async function onDrawerConfirm() {
     </Drawer>
 
     <CancelDrawer>
-      <template #footer>
-        <ElButton
-          :disabled="!activeRecord || !canCancelReservation(activeRecord) || !!cancelingRecordId"
-          :loading="!!activeRecord && cancelingRecordId === activeRecord.record_id"
-          type="danger"
-          @click="onConfirmCancel"
-        >
-          确认取消预约
-        </ElButton>
-      </template>
-
       <ElDescriptions v-if="activeRecord" :column="2" border>
         <ElDescriptionsItem label="借阅记录ID">
           {{ activeRecord.record_id }}

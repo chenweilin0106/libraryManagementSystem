@@ -334,7 +334,9 @@ const gridFormOptions: VbenFormProps = {
   handleReset: async () => {
     await gridApi.formApi.resetForm();
     resetGridSortToDefault();
-    await gridApi.reload();
+    const formValues = await gridApi.formApi.getValues();
+    gridApi.formApi.setLatestSubmissionValues(formValues);
+    await gridApi.reload(formValues);
   },
   resetButtonOptions: { content: '重置' },
   schema: [
