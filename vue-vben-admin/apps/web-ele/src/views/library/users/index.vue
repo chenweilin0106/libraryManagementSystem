@@ -608,6 +608,8 @@ const drawerConfirmText = computed(() => {
 const editingOriginalId = ref<string | null>(null);
 const editingProtected = ref(false);
 const editingOriginalAvatarUrl = ref<string>('');
+const deletingUser = ref<User | null>(null);
+const deletingUserId = ref<string>('');
 
 const userFormSchema: VbenFormSchema[] = [
   {
@@ -690,6 +692,20 @@ const [UserForm, userFormApi] = useVbenForm({
   wrapperClass: 'grid-cols-1',
 });
 
+const [ReadonlyUserForm, readonlyUserFormApi] = useVbenForm({
+  commonConfig: {
+    componentProps: {
+      class: 'w-full',
+    },
+    disabled: true,
+    hideRequiredMark: true,
+  },
+  layout: 'horizontal',
+  schema: userFormSchema,
+  showDefaultActions: false,
+  wrapperClass: 'grid-cols-1',
+});
+
 const [Drawer, drawerApi] = useVbenDrawer({
   destroyOnClose: true,
   onCancel() {
@@ -709,6 +725,22 @@ const [Drawer, drawerApi] = useVbenDrawer({
       uploadExcelFileList.value = [];
     }
   },
+});
+
+const [DeleteDrawer, deleteDrawerApi] = useVbenDrawer({
+  cancelText: '取消',
+  confirmText: '确认删除',
+  destroyOnClose: true,
+  onCancel() {
+    deleteDrawerApi.close();
+  },
+  onClosed() {
+    deletingUser.value = null;
+    deletingUserId.value = '';
+    readonlyUserFormApi.resetForm();
+  },
+  onConfirm: onConfirmDelete,
+  title: '删除用户',
 });
 
 watch(drawerConfirmText, (text) => {
@@ -915,8 +947,41 @@ async function onDelete(row: User) {
     ElMessage.warning('内置账号禁止删除');
     return;
   }
+  deletingUser.value = row;
+  deleteDrawerApi.open();
+  nextTick(() => {
+    readonlyUserFormApi.resetForm();
+    readonlyUserFormApi.setValues(
+      {
+        avatar_files: [
+          {
+            name: '头像',
+            status: 'success',
+            uid: row._id,
+            url: getRowAvatarSrc(row),
+          } as any,
+        ],
+        credit_score: row.credit_score ?? 100,
+        phone: row.phone ?? '',
+        role: row.role,
+        status: row.status,
+        username: row.username,
+      },
+      true,
+      false,
+    );
+  });
+}
+
+async function onConfirmDelete() {
+  const user = deletingUser.value;
+  if (!user) return;
+  if (deletingUserId.value) return;
+  if (!canManageUser(user)) return;
+  if (isProtectedUser(user)) return;
+
   try {
-    await ElMessageBox.confirm(`确认删除用户“${row.username}”吗？`, '删除确认', {
+    await ElMessageBox.confirm(`确认删除用户“${user.username}”吗？`, '确认删除', {
       confirmButtonText: '确认删除',
       cancelButtonText: '取消',
       type: 'warning',
@@ -924,15 +989,22 @@ async function onDelete(row: User) {
   } catch {
     return;
   }
+
+  deletingUserId.value = user._id;
+  deleteDrawerApi.setState({ confirmLoading: true, submitting: true });
   try {
-    await deleteUserApi(row._id);
-    if (row.avatar) {
-      releaseAvatarObjectUrl(row.avatar);
+    await deleteUserApi(user._id);
+    if (user.avatar) {
+      releaseAvatarObjectUrl(user.avatar);
     }
     ElMessage.success('删除成功');
+    deleteDrawerApi.close();
     refresh();
   } catch {
     return;
+  } finally {
+    deleteDrawerApi.setState({ confirmLoading: false, submitting: false });
+    deletingUserId.value = '';
   }
 }
 
@@ -1057,6 +1129,25 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </Drawer>
+
+    <DeleteDrawer>
+      <div class="px-4 pb-4 pt-4">
+        <ReadonlyUserForm>
+          <template #avatar_files="slotProps">
+            <ElUpload
+              v-bind="slotProps"
+              :auto-upload="false"
+              :disabled="true"
+              :limit="1"
+              accept="image/*"
+              list-type="picture-card"
+            >
+              <ElButton :disabled="true" type="primary">选择头像</ElButton>
+            </ElUpload>
+          </template>
+        </ReadonlyUserForm>
+      </div>
+    </DeleteDrawer>
 
     <ImportPreviewModal>
       <div class="flex h-full flex-col">
