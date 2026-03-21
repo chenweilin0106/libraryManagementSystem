@@ -369,7 +369,9 @@ Body：
 
 错误：
 
+- 400：`is_deleted` 缺失或不是 boolean
 - 404：未找到图书
+- 409：存在未结束借阅/预约记录或库存未回收，禁止下架
 
 ### 3.5 ISBN 查询（借书抽屉查询用）
 
@@ -441,7 +443,24 @@ type BooksImportPreviewResponseData = {
 };
 ```
 
-### 3.7 Excel 导入提交（批量入库）
+### 3.7 删除图书（物理删除，仅已下架可用）
+
+`DELETE /api/books/:isbn`
+
+说明：
+
+- 仅 `admin | super` 可调用
+- 仅允许删除已下架图书（`is_deleted=true`）；未下架返回冲突
+- 物理删除数据库记录
+
+错误：
+
+- 400：ISBN 为空
+- 403：权限不足
+- 404：图书不存在
+- 409：图书未下架，禁止删除
+
+### 3.8 Excel 导入提交（批量入库）
 
 `POST /api/books/import/commit`
 

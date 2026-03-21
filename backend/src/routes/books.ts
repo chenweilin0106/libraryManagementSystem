@@ -1,7 +1,7 @@
 import Router from '@koa/router';
 import type { Filter } from 'mongodb';
 
-import { booksCol, type BookDoc } from '../db/collections.js';
+import { booksCol, borrowsCol, type BookDoc } from '../db/collections.js';
 import { getAuthState, requireAdmin } from '../utils/authz.js';
 import { clampPage, clampPageSize } from '../utils/datetime.js';
 import { throwHttpError } from '../utils/http-error.js';
@@ -119,6 +119,26 @@ export function registerBooksRoutes(router: Router) {
     });
 
     ok(ctx, data);
+  });
+
+  router.delete('/books/:isbn', async (ctx) => {
+    requireAdmin(ctx);
+    const isbn = String(ctx.params.isbn ?? '').trim();
+    if (!isbn) {
+      throwHttpError({ status: 400, message: 'BadRequest', error: 'ISBN 不能为空' });
+    }
+
+    const existing = await booksCol().findOne({ isbn });
+    if (!existing) {
+      throwHttpError({ status: 404, message: 'NotFound', error: '图书不存在' });
+    }
+    if (!existing.is_deleted) {
+      throwHttpError({ status: 409, message: 'Conflict', error: '图书未下架，禁止删除' });
+    }
+
+    await booksCol().deleteOne({ _id: existing._id });
+    void bumpRedisVersion('books').catch(() => {});
+    ok(ctx, null);
   });
 
   router.post('/books', async (ctx) => {
@@ -264,11 +284,51 @@ export function registerBooksRoutes(router: Router) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'ISBN 不能为空' });
     }
     const body = (ctx.request as any).body ?? {};
-    const isDeleted = Boolean(body.is_deleted);
-    const result = await booksCol().updateOne({ isbn }, { $set: { is_deleted: isDeleted } });
-    if (result.matchedCount === 0) {
+    const isDeletedRaw = (body as any).is_deleted as unknown;
+    if (typeof isDeletedRaw !== 'boolean') {
+      throwHttpError({ status: 400, message: 'BadRequest', error: 'is_deleted 必须为 boolean' });
+    }
+    const isDeleted = isDeletedRaw;
+
+    const book = await booksCol().findOne(
+      { isbn },
+      { projection: { _id: 1, current_stock: 1, is_deleted: 1, total_stock: 1 } as any },
+    );
+    if (!book) {
       throwHttpError({ status: 404, message: 'NotFound', error: '图书不存在' });
     }
+
+    if (isDeleted && !book.is_deleted) {
+      const reservationStatuses = ['reserved', 'reserve_overdue'] as const;
+      const borrowStatuses = ['borrowed', 'borrow_overdue', 'overdue'] as const;
+      const [reservationCount, borrowCount] = await Promise.all([
+        borrowsCol().countDocuments({ isbn, status: { $in: reservationStatuses as any } } as any),
+        borrowsCol().countDocuments({ isbn, status: { $in: borrowStatuses as any } } as any),
+      ]);
+
+      if (borrowCount > 0 || reservationCount > 0) {
+        throwHttpError({
+          status: 409,
+          message: 'Conflict',
+          error: `存在未结束借阅记录（${borrowCount}）/未结束预约记录（${reservationCount}），禁止下架`,
+        });
+      }
+
+      if (book.current_stock < book.total_stock) {
+        throwHttpError({
+          status: 409,
+          message: 'Conflict',
+          error: `库存未回收（${book.current_stock}/${book.total_stock}），禁止下架`,
+        });
+      }
+    }
+
+    if (book.is_deleted === isDeleted) {
+      ok(ctx, null);
+      return;
+    }
+
+    await booksCol().updateOne({ _id: book._id }, { $set: { is_deleted: isDeleted } });
     void bumpRedisVersion('books').catch(() => {});
     ok(ctx, null);
   });
