@@ -42,7 +42,7 @@ const formSchema = computed((): VbenFormSchema[] => {
         .string()
         .min(1, { message: $t('authentication.selectAccount') })
         .optional()
-        .default('reader1'),
+        .default('vben'),
     },
     {
       component: 'VbenInput',
