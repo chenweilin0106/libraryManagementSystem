@@ -30,6 +30,7 @@ import type { BooksApi } from '#/api';
 import {
   commitBooksImportApi,
   createBookApi,
+  deleteBookApi,
   listBooksApi,
   previewBooksImportApi,
   setBookShelfApi,
@@ -66,6 +67,8 @@ const editingOriginalIsbn = ref<string | null>(null);
 const editingOriginalCoverUrl = ref<string | null>(null);
 const downShelfBook = ref<Book | null>(null);
 const downShelvingIsbn = ref<string>('');
+const deletingBook = ref<Book | null>(null);
+const deletingIsbn = ref<string>('');
 const uploadFileList = ref<any[]>([]);
 const coverPreviewUrl = ref<string>('');
 const coverPreviewOpen = ref(false);
@@ -556,7 +559,7 @@ const gridOptions: VxeGridProps<Book> = {
       fixed: 'right',
       slots: { default: 'actions' },
       title: '操作',
-      width: 160,
+      width: 220,
     },
   ],
   height: 'auto',
@@ -744,6 +747,22 @@ const [DownShelfDrawer, downShelfDrawerApi] = useVbenDrawer({
   title: '下架图书',
 });
 
+const [DeleteDrawer, deleteDrawerApi] = useVbenDrawer({
+  cancelText: '取消',
+  confirmText: '确认删除',
+  destroyOnClose: true,
+  onCancel() {
+    deleteDrawerApi.close();
+  },
+  onClosed() {
+    deletingBook.value = null;
+    deletingIsbn.value = '';
+    readonlyBookFormApi.resetForm();
+  },
+  onConfirm: onConfirmDelete,
+  title: '删除图书',
+});
+
 watch(drawerConfirmText, (text) => {
   drawerApi.setState({ confirmText: text });
 });
@@ -856,6 +875,36 @@ function onDownShelf(row: Book) {
   });
 }
 
+function onDelete(row: Book) {
+  if (!row.is_deleted) return;
+  deletingBook.value = row;
+  deleteDrawerApi.open();
+  nextTick(() => {
+    readonlyBookFormApi.resetForm();
+    readonlyBookFormApi.setValues(
+      {
+        author: row.author,
+        category: row.category,
+        cover_files: [
+          {
+            name: '封面',
+            status: 'success',
+            uid: row.isbn,
+            url: getTableCoverSrc(row),
+          } as any,
+        ],
+        current_stock: row.current_stock,
+        introduction: row.introduction ?? '',
+        isbn: row.isbn,
+        title: row.title,
+        total_stock: row.total_stock,
+      },
+      true,
+      false,
+    );
+  });
+}
+
 async function onConfirmDownShelf() {
   const book = downShelfBook.value;
   if (!book) return;
@@ -882,6 +931,35 @@ async function onConfirmDownShelf() {
   } finally {
     downShelfDrawerApi.setState({ confirmLoading: false });
     downShelvingIsbn.value = '';
+  }
+}
+
+async function onConfirmDelete() {
+  const book = deletingBook.value;
+  if (!book) return;
+  if (!book.is_deleted) return;
+  if (deletingIsbn.value) return;
+
+  try {
+    await ElMessageBox.confirm(`确认删除《${book.title}》吗？`, '确认删除', {
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+  } catch {
+    return;
+  }
+
+  deletingIsbn.value = book.isbn;
+  deleteDrawerApi.setState({ confirmLoading: true });
+  try {
+    await deleteBookApi(book.isbn);
+    ElMessage.success('删除成功');
+    deleteDrawerApi.close();
+    refresh();
+  } finally {
+    deleteDrawerApi.setState({ confirmLoading: false });
+    deletingIsbn.value = '';
   }
 }
 
@@ -1102,6 +1180,25 @@ onBeforeUnmount(() => {
       </div>
     </DownShelfDrawer>
 
+    <DeleteDrawer>
+      <div class="mt-2">
+        <ReadonlyBookForm>
+          <template #cover_files="slotProps">
+            <ElUpload
+              v-bind="slotProps"
+              :auto-upload="false"
+              :disabled="true"
+              :limit="1"
+              accept="image/*"
+              list-type="picture-card"
+            >
+              <ElButton :disabled="true" type="primary">选择封面</ElButton>
+            </ElUpload>
+          </template>
+        </ReadonlyBookForm>
+      </div>
+    </DeleteDrawer>
+
     <Grid table-title="图书列表">
       <template #toolbar-tools>
         <ElButton type="primary" @click="onCreate">
@@ -1134,6 +1231,9 @@ onBeforeUnmount(() => {
           <ElButton link type="primary" @click="onEdit(row)">编辑</ElButton>
           <ElButton v-if="row.is_deleted" link type="success" @click="onUpShelf(row)">
             上架
+          </ElButton>
+          <ElButton v-if="row.is_deleted" link type="danger" @click="onDelete(row)">
+            删除
           </ElButton>
           <ElButton v-else link type="danger" @click="onDownShelf(row)">下架</ElButton>
         </div>

@@ -135,6 +135,10 @@ export async function setBookShelfApi(isbn: string, is_deleted: boolean) {
   });
 }
 
+export async function deleteBookApi(isbn: string) {
+  return requestClient.delete<null>(`/books/${encodeURIComponent(isbn)}`);
+}
+
 export async function getBookByIsbnApi(isbn: string) {
   return requestClient.get<BooksApi.BookLookup>(
     `/books/${encodeURIComponent(isbn)}`,
