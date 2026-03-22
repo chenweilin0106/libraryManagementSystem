@@ -103,12 +103,12 @@
 - 建议格式：`<type>(scope): <summary>`
   - `type`：`feat`/`fix`/`refactor`/`chore`/`docs` 等
   - `scope`：`backend`/`frontend`/`docs`/具体模块名
-  - `summary`：一句话说明做了什么
+  - `summary`：**优先中文**一句话说明做了什么（保留必要的英文标识符/路径/字段名即可，不要求全中文）
 - 参考示例：
-  - `feat(backend): add list sorting options`
-  - `feat(frontend): move profile menu to bottom`
-  - `docs(records): add page development notes`
-  - `chore(git): stop tracking idea workspace file`
+  - `feat(backend): 优化 books 列表查询性能`
+  - `fix(frontend): 修复图书导入预览状态未重置`
+  - `docs(records): 补充图书上/下架规则与验收点`
+  - `chore(git): 忽略本地 IDE 临时文件`
 
 ### 不要提交的内容
 - 本地 IDE/个人环境文件（例如 `.idea/workspace.xml` 这类变动）默认不提交，除非团队明确需要共享。
