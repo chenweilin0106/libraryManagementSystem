@@ -2,6 +2,7 @@ import Router from '@koa/router';
 import { ObjectId } from 'mongodb';
 import type { Filter } from 'mongodb';
 
+import { deleteSessionsByUserId } from '../db/auth.js';
 import { usersCol, type UserDoc, type UserRole, type UserStatus } from '../db/collections.js';
 import { hashPassword } from '../utils/crypto.js';
 import { clampPage, clampPageSize } from '../utils/datetime.js';
@@ -372,6 +373,10 @@ export function registerUsersRoutes(router: Router) {
       { _id: existing._id },
       { $set: { password_hash: password.hash, password_salt: password.salt } },
     );
+
+    // 重置密码后强制退出：删除该用户所有会话
+    await deleteSessionsByUserId(existing._id);
+
     ok(ctx, null);
   });
 
@@ -397,6 +402,7 @@ export function registerUsersRoutes(router: Router) {
     }
 
     await usersCol().deleteOne({ _id: existing._id });
+    await deleteSessionsByUserId(existing._id);
     void bumpRedisVersion('users').catch(() => {});
     ok(ctx, null);
   });

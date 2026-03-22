@@ -137,6 +137,8 @@ export async function bootstrapMongo() {
   await booksCol().createIndex({ isbn: 1 }, { unique: true });
   await borrowsCol().createIndex({ record_id: 1 }, { unique: true });
   await borrowsCol().createIndex({ username: 1, isbn: 1, returned_at: 1 });
+  await borrowsCol().createIndex({ user_id: 1, isbn: 1, returned_at: 1, status: 1 });
+  await borrowsCol().createIndex({ isbn: 1, status: 1 });
   await borrowsCol().createIndex({ status: 1, pickup_due_at: 1 });
   await borrowsCol().createIndex({ status: 1, return_due_at: 1 });
   await borrowsCol().createIndex({ reserved_at: 1 });

@@ -30,13 +30,33 @@ type CacheEntry = {
 };
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 50;
 const importCache = new Map<string, CacheEntry>();
 
 const DEFAULT_PASSWORD = '123456';
 const PROTECTED_USERNAMES = new Set(['admin', 'vben']);
 const CN_PHONE_RE = /^1[3-9]\d{9}$/;
 
+function cleanupImportCache() {
+  const now = Date.now();
+  for (const [key, entry] of importCache.entries()) {
+    if (now > entry.expires_at) {
+      importCache.delete(key);
+    }
+  }
+
+  if (importCache.size <= CACHE_MAX_ENTRIES) return;
+
+  const entries = [...importCache.entries()].sort((a, b) => a[1].created_at - b[1].created_at);
+  const overflow = entries.length - CACHE_MAX_ENTRIES;
+  for (let i = 0; i < overflow; i += 1) {
+    const key = entries[i]?.[0];
+    if (key) importCache.delete(key);
+  }
+}
+
 function getCacheEntry(importId: string) {
+  cleanupImportCache();
   const entry = importCache.get(importId);
   if (!entry) return null;
   if (Date.now() > entry.expires_at) {
@@ -309,6 +329,7 @@ export function registerUsersImportRoutes(router: Router) {
     };
 
     const import_id = randomUUID();
+    cleanupImportCache();
     importCache.set(import_id, {
       created_at: Date.now(),
       expires_at: Date.now() + CACHE_TTL_MS,

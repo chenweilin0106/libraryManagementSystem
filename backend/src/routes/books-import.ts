@@ -13,6 +13,7 @@ import { ok } from '../utils/response.js';
 type ConflictStrategy = 'increment_stock' | 'skip' | 'overwrite';
 
 const OVERWRITE_BLOCKED_ERROR = '图书处于上架状态，禁止覆盖字段，请先下架';
+const DEFAULT_COVER_URL = '/covers/cover-placeholder.svg';
 
 type ParsedRow = {
   row_number: number;
@@ -33,9 +34,29 @@ type CacheEntry = {
 };
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 50;
 const importCache = new Map<string, CacheEntry>();
 
+function cleanupImportCache() {
+  const now = Date.now();
+  for (const [key, entry] of importCache.entries()) {
+    if (now > entry.expires_at) {
+      importCache.delete(key);
+    }
+  }
+
+  if (importCache.size <= CACHE_MAX_ENTRIES) return;
+
+  const entries = [...importCache.entries()].sort((a, b) => a[1].created_at - b[1].created_at);
+  const overflow = entries.length - CACHE_MAX_ENTRIES;
+  for (let i = 0; i < overflow; i += 1) {
+    const key = entries[i]?.[0];
+    if (key) importCache.delete(key);
+  }
+}
+
 function getCacheEntry(importId: string) {
+  cleanupImportCache();
   const entry = importCache.get(importId);
   if (!entry) return null;
   if (Date.now() > entry.expires_at) {
@@ -285,6 +306,7 @@ export function registerBooksImportRoutes(router: Router) {
     };
 
     const import_id = randomUUID();
+    cleanupImportCache();
     importCache.set(import_id, {
       created_at: Date.now(),
       expires_at: Date.now() + CACHE_TTL_MS,
@@ -367,7 +389,7 @@ export function registerBooksImportRoutes(router: Router) {
             author: row.author,
             introduction: row.introduction,
             category: row.category,
-            cover_url: row.cover_url,
+            cover_url: row.cover_url || DEFAULT_COVER_URL,
             total_stock: delta,
             current_stock: delta,
             // 约定：导入新书默认下架，需管理员手动上架
@@ -383,7 +405,7 @@ export function registerBooksImportRoutes(router: Router) {
               title: row.title,
               author: row.author,
               category: row.category,
-              cover_url: row.cover_url,
+              cover_url: row.cover_url || DEFAULT_COVER_URL,
               is_deleted: true,
             } as any,
           );

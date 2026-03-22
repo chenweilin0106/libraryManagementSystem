@@ -46,7 +46,12 @@ function parseImageDataUrl(dataUrl: string) {
 }
 
 function sanitizeFilename(input: string) {
-  const decoded = decodeURIComponent(String(input ?? '').trim());
+  let decoded = '';
+  try {
+    decoded = decodeURIComponent(String(input ?? '').trim());
+  } catch {
+    return '';
+  }
   const base = path.basename(decoded);
   if (!base || base !== decoded) return '';
   if (base.includes('..') || base.includes('/') || base.includes('\\')) return '';
@@ -109,4 +114,3 @@ export function registerUploadRoutes(router: Router) {
     ctx.body = createReadStream(abs);
   });
 }
-

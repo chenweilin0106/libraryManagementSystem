@@ -26,6 +26,8 @@ export const env = {
   refreshTokenCookieName: readEnv('REFRESH_TOKEN_COOKIE_NAME', 'refreshToken'),
   seedDemoData: readEnv('SEED_DEMO_DATA', '1') === '1',
 
+  corsAllowedOrigins: readEnv('CORS_ALLOWED_ORIGINS', ''),
+
   redisEnabled: readEnv('REDIS_ENABLED', '0') === '1',
   redisUrl: readEnv('REDIS_URL', 'redis://127.0.0.1:6379/0'),
   redisKeyPrefix: readEnv('REDIS_KEY_PREFIX', 'lms:'),

@@ -18,15 +18,8 @@ export async function errorHandler(ctx: Context, next: Next) {
           ? (error as any).status
           : 500;
 
-    const type =
-      error instanceof HttpError
-        ? error.type
-        : typeof (error as any)?.name === 'string'
-          ? (error as any).name
-          : status === 500
-            ? 'InternalServerError'
-            : 'Error';
-    const errorMessage =
+    // 统一约定：message 用于前端 toast，尽量返回“中文原因”而不是技术细节。
+    const message =
       error instanceof HttpError
         ? error.error
         : status === 500
@@ -35,10 +28,9 @@ export async function errorHandler(ctx: Context, next: Next) {
 
     ctx.status = status;
     ctx.body = {
-      code: -1,
+      code: status,
+      message,
       data: null,
-      error: errorMessage,
-      message: type,
     };
     ctx.app.emit('error', error, ctx);
   }

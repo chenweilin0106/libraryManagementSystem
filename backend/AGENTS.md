@@ -14,8 +14,11 @@
 
 ## 接口与错误约定
 - 统一返回：`{ code, message, data }`
-  - 成功：`code=0`
-  - 失败：`code=HTTP状态码`，`data=null`
+  - 成功：`code=0`，`message='ok'`（可按需覆盖），`data=<payload>`
+  - 失败：保持正确 HTTP 状态码（400/401/403/404/409/429/500...），同时响应体：
+    - `code=HTTP状态码`
+    - `message=中文错误原因`（用于前端 toast）
+    - `data=null`
 - 统一错误处理中间件：`src/middlewares/error-handler.ts`
 - 未命中路由返回 404：`{ code:404, message:'Not Found', data:null }`
 
@@ -30,4 +33,3 @@
 - 数据访问层：`src/db/`（尽量把 collection 操作封装成模块）
 - 参数校验/转换：放在 `src/utils/` 或按业务新建 `src/validators/`
 - 通用中间件：`src/middlewares/`
-

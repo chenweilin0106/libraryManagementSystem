@@ -15,7 +15,6 @@ import {
   buildBorrowsListCacheKey,
   buildBorrowsMyCacheKey,
   bumpRedisVersion,
-  incrHotBooksRank,
   withRedisCache,
 } from '../utils/redis-cache.js';
 import { ok } from '../utils/response.js';
@@ -96,6 +95,25 @@ async function findUserByUsername(username: string) {
 
 async function findBookByIsbn(isbn: string) {
   return await booksCol().findOne({ isbn });
+}
+
+async function incrementBookStockOrThrow(isbn: string) {
+  const result = await booksCol().updateOne(
+    { isbn } as any,
+    [
+      {
+        $set: {
+          current_stock: {
+            $min: ['$total_stock', { $add: ['$current_stock', 1] }],
+          },
+        },
+      },
+    ] as any,
+  );
+
+  if (result.matchedCount === 0) {
+    throw new Error(`books.isbn 不存在：${isbn}`);
+  }
 }
 
 async function findBookIsbnsByFilters(input: { author: string; category: string; title: string }) {
@@ -423,10 +441,23 @@ export function registerBorrowsRoutes(router: Router) {
         updated_at: now,
       };
       await borrowsCol().insertOne(doc);
-      createdRecord = (await borrowsCol().findOne({ _id: recordId })) as any;
+      createdRecord = doc as any;
     } catch (error) {
-      await booksCol().updateOne({ isbn }, { $inc: { current_stock: 1 } }).catch(() => {});
-      throw error;
+      try {
+        await incrementBookStockOrThrow(isbn);
+      } catch (rollbackError) {
+        console.warn('[borrows] reserve rollback stock failed:', rollbackError);
+        throwHttpError({
+          status: 500,
+          message: 'InternalServerError',
+          error: '预约失败且库存回滚失败，请联系管理员',
+        });
+      }
+      throwHttpError({
+        status: 500,
+        message: 'InternalServerError',
+        error: '预约失败，请稍后重试',
+      });
     }
 
     ok(ctx, {
@@ -487,20 +518,22 @@ export function registerBorrowsRoutes(router: Router) {
       throwHttpError({ status: 409, message: 'Conflict', error: '记录不可取消' });
     }
 
-    await booksCol()
-      .updateOne(
-        { isbn: record.isbn } as any,
-        [
-          {
-            $set: {
-              current_stock: {
-                $min: ['$total_stock', { $add: ['$current_stock', 1] }],
-              },
-            },
-          },
-        ] as any,
-      )
-      .catch(() => {});
+    try {
+      await incrementBookStockOrThrow(record.isbn);
+    } catch (error) {
+      console.warn('[borrows] cancel update stock failed:', error);
+      await borrowsCol()
+        .updateOne(
+          { _id: record._id, returned_at: { $exists: false }, status: 'canceled' } as any,
+          { $set: { status: normalized.status, updated_at: now } },
+        )
+        .catch(() => {});
+      throwHttpError({
+        status: 500,
+        message: 'InternalServerError',
+        error: '取消预约失败，请稍后重试',
+      });
+    }
 
     const latest = await normalizeBorrowDoc(updatedRecord as any, now);
     ok(ctx, recordToApi((latest ?? updatedRecord) as BorrowDoc, now));
@@ -611,7 +644,6 @@ export function registerBorrowsRoutes(router: Router) {
         });
 
         void bumpRedisVersion('borrows').catch(() => {});
-        void incrHotBooksRank({ bookId: `B-${book.isbn}` }).catch(() => {});
         return;
       }
 
@@ -651,10 +683,23 @@ export function registerBorrowsRoutes(router: Router) {
         updated_at: now,
       };
       await borrowsCol().insertOne(doc);
-      createdRecord = (await borrowsCol().findOne({ _id: recordId })) as any;
+      createdRecord = doc as any;
     } catch (error) {
-      await booksCol().updateOne({ isbn }, { $inc: { current_stock: 1 } }).catch(() => {});
-      throw error;
+      try {
+        await incrementBookStockOrThrow(isbn);
+      } catch (rollbackError) {
+        console.warn('[borrows] borrow rollback stock failed:', rollbackError);
+        throwHttpError({
+          status: 500,
+          message: 'InternalServerError',
+          error: '借阅失败且库存回滚失败，请联系管理员',
+        });
+      }
+      throwHttpError({
+        status: 500,
+        message: 'InternalServerError',
+        error: '借阅失败，请稍后重试',
+      });
     }
 
     ok(ctx, {
@@ -670,7 +715,6 @@ export function registerBorrowsRoutes(router: Router) {
       bumpRedisVersion('borrows').catch(() => {}),
       bumpRedisVersion('books').catch(() => {}),
     ]);
-    void incrHotBooksRank({ bookId: `B-${book.isbn}` }).catch(() => {});
   });
 
   router.put('/borrows/:recordId/return', async (ctx) => {
@@ -722,20 +766,29 @@ export function registerBorrowsRoutes(router: Router) {
       throwHttpError({ status: 409, message: 'Conflict', error: '记录不可还' });
     }
 
-    await booksCol()
-      .updateOne(
-        { isbn: record.isbn } as any,
-        [
+    try {
+      await incrementBookStockOrThrow(record.isbn);
+    } catch (error) {
+      console.warn('[borrows] return update stock failed:', error);
+      await borrowsCol()
+        .updateOne(
+          { _id: record._id, status: 'returned', returned_at: returnedAt } as any,
           {
             $set: {
-              current_stock: {
-                $min: ['$total_stock', { $add: ['$current_stock', 1] }],
-              },
+              fine_amount: record.fine_amount ?? 0,
+              status: normalized.status,
+              updated_at: now,
             },
-          },
-        ] as any,
-      )
-      .catch(() => {});
+            $unset: { return_date: '', returned_at: '' },
+          } as any,
+        )
+        .catch(() => {});
+      throwHttpError({
+        status: 500,
+        message: 'InternalServerError',
+        error: '还书失败，请稍后重试',
+      });
+    }
 
     const latest = await normalizeBorrowDoc(updatedRecord as any, now);
     ok(ctx, recordToApi((latest ?? updatedRecord) as BorrowDoc, now));

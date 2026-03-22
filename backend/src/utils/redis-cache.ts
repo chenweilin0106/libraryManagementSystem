@@ -100,35 +100,6 @@ export async function buildAnalyticsOverviewCacheKey(input: { mode: string }) {
   return `cache:analytics:overview:v${v}:${mode}`;
 }
 
-export async function incrHotBooksRank(input: { bookId: string; delta?: number }) {
-  const client = await getRedisClient();
-  if (!client) return;
-  const bookId = String(input.bookId ?? '').trim();
-  if (!bookId) return;
-  const delta = input.delta ?? 1;
-  if (!Number.isFinite(delta) || delta === 0) return;
-
-  await client.zIncrBy(cacheKey('rank:hot_books'), delta, bookId);
-}
-
-export async function getHotBooksRank(limit: number) {
-  const client = await getRedisClient();
-  if (!client) return [];
-
-  const n = Number.isFinite(limit) ? Math.trunc(limit) : 0;
-  const clamped = Math.min(50, Math.max(1, n || 10));
-
-  const rows = await client.zRangeWithScores(cacheKey('rank:hot_books'), 0, clamped - 1, {
-    REV: true,
-  });
-  return rows
-    .map((row: any) => ({
-      bookId: String(row?.value ?? row?.member ?? '').trim(),
-      borrowCount: Number(row?.score ?? 0),
-    }))
-    .filter((r) => r.bookId);
-}
-
 export async function buildBorrowsMyCacheKey(input: {
   userId: string;
   query: Record<string, any>;

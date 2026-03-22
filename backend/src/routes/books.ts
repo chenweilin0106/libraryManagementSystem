@@ -14,6 +14,7 @@ import {
 import { ok } from '../utils/response.js';
 
 const INTRODUCTION_MAX_LEN = 300;
+const DEFAULT_COVER_URL = '/covers/cover-placeholder.svg';
 type BooksSortBy = 'created_at' | 'current_stock';
 type BooksSortOrder = 'asc' | 'desc';
 
@@ -55,6 +56,19 @@ function parseSortOrder(value: unknown): BooksSortOrder | null {
 
 function toLikeRegex(value: string) {
   return new RegExp(value.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+}
+
+function parseCoverUrl(value: unknown) {
+  const url = normalizeText(value);
+  if (!url) return { url: DEFAULT_COVER_URL, error: '' };
+  const lower = url.toLowerCase();
+  if (lower.startsWith('http://') || lower.startsWith('https://') || url.startsWith('/')) {
+    return { url, error: '' };
+  }
+  return {
+    url,
+    error: 'cover_url 必须是 http(s) URL 或以 / 开头的相对路径',
+  };
 }
 
 function bookToApi(doc: BookDoc) {
@@ -166,7 +180,7 @@ export function registerBooksRoutes(router: Router) {
     const author = normalizeText(body.author);
     const introduction = normalizeText(body.introduction);
     const category = normalizeText(body.category);
-    const coverUrl = normalizeText(body.cover_url);
+    const { url: coverUrl, error: coverUrlError } = parseCoverUrl(body.cover_url);
     const totalStock = toNonNegativeInt(body.total_stock);
     const currentStock = toNonNegativeInt(body.current_stock);
 
@@ -185,6 +199,9 @@ export function registerBooksRoutes(router: Router) {
     }
     if (currentStock === null) {
       throwHttpError({ status: 400, message: 'BadRequest', error: '当前可借数量不合法' });
+    }
+    if (coverUrlError) {
+      throwHttpError({ status: 400, message: 'BadRequest', error: coverUrlError });
     }
     if (currentStock > totalStock) {
       throwHttpError({
@@ -234,7 +251,7 @@ export function registerBooksRoutes(router: Router) {
     const author = normalizeText(body.author);
     const introduction = normalizeText(body.introduction);
     const category = normalizeText(body.category);
-    const coverUrl = normalizeText(body.cover_url);
+    const { url: coverUrl, error: coverUrlError } = parseCoverUrl(body.cover_url);
     const totalStock = toNonNegativeInt(body.total_stock);
     const currentStock = toNonNegativeInt(body.current_stock);
 
@@ -253,6 +270,9 @@ export function registerBooksRoutes(router: Router) {
     }
     if (currentStock === null) {
       throwHttpError({ status: 400, message: 'BadRequest', error: '当前可借数量不合法' });
+    }
+    if (coverUrlError) {
+      throwHttpError({ status: 400, message: 'BadRequest', error: coverUrlError });
     }
     if (currentStock > totalStock) {
       throwHttpError({
