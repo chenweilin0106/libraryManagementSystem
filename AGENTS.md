@@ -184,6 +184,59 @@ const [Grid] = useVbenVxeGrid({ gridOptions });
 ### 图片展示
 - 展示图片默认使用可预览组件：优先 `ElImage` + `preview-src-list` + `preview-teleported`，并提供加载失败兜底（占位图）。
 
+### 表格操作按钮（统一样式）
+适用场景：所有列表页表格的“操作”列（含管理员端与用户端）。
+
+统一规范：
+- 操作列内容统一居中，按钮间距统一：外层使用 `div.flex.items-center.justify-center.gap-2`
+- 默认使用“文字按钮”风格：`<ElButton link ...>`（与管理端既有页面保持一致）
+- 类型约定（与业务语义保持一致）：
+  - 主操作：`type="primary"`
+  - 危险/删除/取消：`type="danger"`
+  - 成功/确认完成类：`type="success"`
+  - 警告/提示性操作：`type="warning"`
+  - 次要/查看类：`type="info"` 或 `type="primary"`（按页面现有风格优先）
+- 禁用置灰：对“不可操作/已完成/已预约”等状态，使用 `:disabled="true"`（保持 `link` 风格即可自然置灰）
+- 加载态：请求中使用 `:loading="true"`，并同时禁用（避免重复点击）
+- 操作数量控制：同一行操作建议不超过 3 个；超过时优先合并为“更多”下拉或仅保留关键入口
+
+示例（Element Plus + VxeGrid `#actions` 插槽）：
+```vue
+<template #actions="{ row }">
+  <div class="flex items-center justify-center gap-2">
+    <!-- 查看/详情 -->
+    <ElButton link type="primary" @click="openDetail(row)">详情</ElButton>
+
+    <!-- 主操作 -->
+    <ElButton
+      :disabled="!canDo(row) || doingId === row.id"
+      :loading="doingId === row.id"
+      link
+      type="primary"
+      @click="onDo(row)"
+    >
+      {{ canDo(row) ? '办理' : '已办理' }}
+    </ElButton>
+
+    <!-- 危险操作：取消/删除 -->
+    <ElButton
+      :disabled="cancelingId === row.id"
+      :loading="cancelingId === row.id"
+      link
+      type="danger"
+      @click="onCancel(row)"
+    >
+      取消预约
+    </ElButton>
+
+    <!-- 其它语义示例 -->
+    <ElButton link type="success" @click="onConfirm(row)">确认</ElButton>
+    <ElButton link type="warning" @click="onWarn(row)">提醒</ElButton>
+    <ElButton link type="info" @click="onSecondary(row)">次要</ElButton>
+  </div>
+</template>
+```
+
 ### 数据操作
 - 所有“会改变数据”的操作（新增/编辑/删除/下架/上架/借阅/还书/预约/取消预约等）默认需要二次确认：
   - 使用 `ElMessageBox.confirm(...)`，点击取消要 `try/catch` 直接 return。
