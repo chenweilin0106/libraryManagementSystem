@@ -1,7 +1,7 @@
 import { defineEventHandler, readBody, setResponseStatus } from 'h3';
 
 import { verifyAccessToken } from '~/utils/jwt-utils';
-import { updateBook } from '~/utils/library-books';
+import { findBookByIsbn, updateBook } from '~/utils/library-books';
 import {
   sleep,
   unAuthorizedResponse,
@@ -9,9 +9,12 @@ import {
   useResponseSuccess,
 } from '~/utils/response';
 
-function toNumber(value: unknown) {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : NaN;
+function toNonNegativeInt(value: unknown) {
+  const n = typeof value === 'number' ? value : Number(String(value ?? '').trim());
+  if (!Number.isFinite(n)) return null;
+  if (!Number.isSafeInteger(n)) return null;
+  if (n < 0) return null;
+  return n;
 }
 
 function getIsbnParam(event: any) {
@@ -42,24 +45,30 @@ export default defineEventHandler(async (event) => {
   const author = String(body.author ?? '').trim();
   const category = String(body.category ?? '').trim();
   const cover_url = String(body.cover_url ?? '').trim();
-  const total_stock = toNumber(body.total_stock);
-  const current_stock = toNumber(body.current_stock);
+  const total_stock = toNonNegativeInt(body.total_stock);
+  const current_stock = toNonNegativeInt(body.current_stock);
 
   if (!isbn || !title || !author || !category) {
     setResponseStatus(event, 400);
     return useResponseError('BadRequestException', '字段不能为空');
   }
-  if (!Number.isFinite(total_stock) || total_stock < 0) {
+  if (total_stock === null) {
     setResponseStatus(event, 400);
     return useResponseError('BadRequestException', '总库存不合法');
   }
-  if (!Number.isFinite(current_stock) || current_stock < 0) {
+  if (current_stock === null) {
     setResponseStatus(event, 400);
     return useResponseError('BadRequestException', '当前可借数量不合法');
   }
   if (current_stock > total_stock) {
     setResponseStatus(event, 400);
     return useResponseError('BadRequestException', '当前可借数量不能大于总库存');
+  }
+
+  const existing = findBookByIsbn(originalIsbn);
+  if (existing && !existing.is_deleted) {
+    setResponseStatus(event, 409);
+    return useResponseError('ConflictException', '图书处于上架状态，禁止编辑，请先下架');
   }
 
   const { book, error } = updateBook(originalIsbn, {
@@ -79,4 +88,3 @@ export default defineEventHandler(async (event) => {
 
   return useResponseSuccess(book);
 });
-

@@ -9,9 +9,12 @@ import {
   useResponseSuccess,
 } from '~/utils/response';
 
-function toNumber(value: unknown) {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : NaN;
+function toNonNegativeInt(value: unknown) {
+  const n = typeof value === 'number' ? value : Number(String(value ?? '').trim());
+  if (!Number.isFinite(n)) return null;
+  if (!Number.isSafeInteger(n)) return null;
+  if (n < 0) return null;
+  return n;
 }
 
 export default defineEventHandler(async (event) => {
@@ -29,18 +32,18 @@ export default defineEventHandler(async (event) => {
   const author = String(body.author ?? '').trim();
   const category = String(body.category ?? '').trim();
   const cover_url = String(body.cover_url ?? '').trim();
-  const total_stock = toNumber(body.total_stock);
-  const current_stock = toNumber(body.current_stock);
+  const total_stock = toNonNegativeInt(body.total_stock);
+  const current_stock = toNonNegativeInt(body.current_stock);
 
   if (!isbn || !title || !author || !category) {
     setResponseStatus(event, 400);
     return useResponseError('BadRequestException', '字段不能为空');
   }
-  if (!Number.isFinite(total_stock) || total_stock < 0) {
+  if (total_stock === null) {
     setResponseStatus(event, 400);
     return useResponseError('BadRequestException', '总库存不合法');
   }
-  if (!Number.isFinite(current_stock) || current_stock < 0) {
+  if (current_stock === null) {
     setResponseStatus(event, 400);
     return useResponseError('BadRequestException', '当前可借数量不合法');
   }
@@ -66,4 +69,3 @@ export default defineEventHandler(async (event) => {
 
   return useResponseSuccess(book);
 });
-
