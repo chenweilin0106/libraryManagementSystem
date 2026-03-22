@@ -25,7 +25,6 @@ export default defineEventHandler(async (event) => {
   const body = (await readBody(event)) ?? {};
   const import_id = String(body.import_id ?? '').trim();
   const conflict_strategy = body.conflict_strategy;
-  const auto_unshelf = body.auto_unshelf == null ? true : Boolean(body.auto_unshelf);
 
   if (!import_id) {
     setResponseStatus(event, 400);
@@ -99,7 +98,7 @@ export default defineEventHandler(async (event) => {
 
     const nextTotal = (existing.total_stock ?? 0) + delta;
     const nextCurrent = (existing.current_stock ?? 0) + delta;
-    const is_deleted = auto_unshelf && delta > 0 ? false : existing.is_deleted;
+    const is_deleted = existing.is_deleted;
 
     const patch = {
       author:
@@ -142,4 +141,3 @@ export default defineEventHandler(async (event) => {
     items,
   });
 });
-

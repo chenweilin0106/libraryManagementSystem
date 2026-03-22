@@ -13,8 +13,14 @@ export namespace BooksApi {
     introduction: string;
     is_deleted: boolean;
     isbn: string;
+    shelved_at: null | string;
+    shelved_by_user_id: null | string;
+    shelved_by_username: null | string;
     title: string;
     total_stock: number;
+    unshelved_at: null | string;
+    unshelved_by_user_id: null | string;
+    unshelved_by_username: null | string;
   }
 
   export interface PageResult<T> {
@@ -87,7 +93,6 @@ export namespace BooksApi {
   export interface ImportCommitBody {
     import_id: string;
     conflict_strategy: ImportConflictStrategy;
-    auto_unshelf?: boolean;
   }
 
   export interface ImportCommitItem {

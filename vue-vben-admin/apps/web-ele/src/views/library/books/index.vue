@@ -17,7 +17,6 @@ import {
   ElMessageBox,
   ElRadioButton,
   ElRadioGroup,
-  ElSwitch,
   ElTabPane,
   ElTabs,
   ElTag,
@@ -76,7 +75,6 @@ const importPreviewLoading = ref(false);
 const importCommitLoading = ref(false);
 const importPreviewData = ref<BooksApi.ImportPreviewResponseData | null>(null);
 const importConflictStrategy = ref<ImportConflictStrategy>('increment_stock');
-const importAutoUnshelf = ref(true);
 // vben-form 托管 Upload 的 fileList（modelPropNameMap: Upload -> fileList）
 // 需要通过 formApi 更新 cover_files 才能让 UI 生效
 
@@ -420,7 +418,6 @@ function resetImportPreview() {
   importCommitLoading.value = false;
   importPreviewData.value = null;
   importConflictStrategy.value = 'increment_stock';
-  importAutoUnshelf.value = true;
   importCoverLoadFailedIsbns.value = new Set();
   try {
     importGridApi.setGridOptions({ data: [] });
@@ -438,7 +435,6 @@ async function onImportCommit() {
   importPreviewModalApi.setState({ confirmDisabled: true, confirmLoading: true });
   try {
     const result = await commitBooksImportApi({
-      auto_unshelf: importAutoUnshelf.value,
       conflict_strategy: importConflictStrategy.value,
       import_id: importId,
     });
@@ -1264,12 +1260,6 @@ onBeforeUnmount(() => {
               <ElRadioButton label="skip">老书跳过</ElRadioButton>
               <ElRadioButton label="overwrite">老书覆盖字段</ElRadioButton>
             </ElRadioGroup>
-            <ElSwitch
-              v-model="importAutoUnshelf"
-              active-text="自动上架"
-              inactive-text="不自动上架"
-              inline-prompt
-            />
           </div>
         </div>
 
