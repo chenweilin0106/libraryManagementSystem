@@ -4,6 +4,7 @@ import type { Filter, WithId } from 'mongodb';
 
 import { booksCol, borrowsCol, usersCol, type BorrowDoc, type BorrowStatus } from '../db/collections.js';
 import { getAuthState, isManagerRole, requireAdmin } from '../utils/authz.js';
+import { incrementBookStockOrThrow } from '../utils/book-stock.js';
 import {
   buildBorrowMigrationPatch,
   refreshBorrowOverdueStatuses,
@@ -95,25 +96,6 @@ async function findUserByUsername(username: string) {
 
 async function findBookByIsbn(isbn: string) {
   return await booksCol().findOne({ isbn });
-}
-
-async function incrementBookStockOrThrow(isbn: string) {
-  const result = await booksCol().updateOne(
-    { isbn } as any,
-    [
-      {
-        $set: {
-          current_stock: {
-            $min: ['$total_stock', { $add: ['$current_stock', 1] }],
-          },
-        },
-      },
-    ] as any,
-  );
-
-  if (result.matchedCount === 0) {
-    throw new Error(`books.isbn 不存在：${isbn}`);
-  }
 }
 
 async function findBookIsbnsByFilters(input: { author: string; category: string; title: string }) {
@@ -478,7 +460,6 @@ export function registerBorrowsRoutes(router: Router) {
   router.put('/borrows/:recordId/cancel', async (ctx) => {
     const auth = getAuthState(ctx);
     const now = new Date();
-    await refreshBorrowOverdueStatuses(now);
 
     const recordId = normalizeText(ctx.params.recordId);
     if (!recordId) {
@@ -505,27 +486,50 @@ export function registerBorrowsRoutes(router: Router) {
       throwHttpError({ status: 409, message: 'Conflict', error: '仅待取书记录可取消' });
     }
 
-    const updatedRecord = await borrowsCol().findOneAndUpdate(
+    const before = await borrowsCol().findOneAndUpdate(
       {
         _id: record._id,
         returned_at: { $exists: false },
         status: { $in: ['reserved', 'reserve_overdue'] },
       } as any,
-      { $set: { status: 'canceled', updated_at: now } },
-      { returnDocument: 'after' },
+      [
+        {
+          $set: {
+            status: 'canceled',
+            // 确保“库存回补”在并发下不会重复发生：若未释放过库存，则在取消时写入标记。
+            reservation_stock_released_at: { $ifNull: ['$reservation_stock_released_at', now] },
+            updated_at: now,
+          },
+        },
+      ] as any,
+      { returnDocument: 'before' },
     );
-    if (!updatedRecord) {
+    if (!before) {
       throwHttpError({ status: 409, message: 'Conflict', error: '记录不可取消' });
     }
 
+    const needsReleaseStock = !(before as any).reservation_stock_released_at;
     try {
-      await incrementBookStockOrThrow(record.isbn);
+      if (needsReleaseStock) await incrementBookStockOrThrow(record.isbn);
     } catch (error) {
       console.warn('[borrows] cancel update stock failed:', error);
+      const rollbackSet: Record<string, any> = {
+        status: (before as any).status,
+        updated_at: now,
+      };
+      const rollbackUnset: Record<string, ''> = {};
+      const prevReleasedAt = (before as any).reservation_stock_released_at;
+      if (prevReleasedAt) {
+        rollbackSet.reservation_stock_released_at = prevReleasedAt;
+      } else {
+        rollbackUnset.reservation_stock_released_at = '';
+      }
       await borrowsCol()
         .updateOne(
           { _id: record._id, returned_at: { $exists: false }, status: 'canceled' } as any,
-          { $set: { status: normalized.status, updated_at: now } },
+          Object.keys(rollbackUnset).length > 0
+            ? ({ $set: rollbackSet, $unset: rollbackUnset } as any)
+            : ({ $set: rollbackSet } as any),
         )
         .catch(() => {});
       throwHttpError({
@@ -535,6 +539,7 @@ export function registerBorrowsRoutes(router: Router) {
       });
     }
 
+    const updatedRecord = await borrowsCol().findOne({ _id: record._id } as any);
     const latest = await normalizeBorrowDoc(updatedRecord as any, now);
     ok(ctx, recordToApi((latest ?? updatedRecord) as BorrowDoc, now));
 

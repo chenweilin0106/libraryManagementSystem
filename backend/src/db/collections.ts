@@ -61,6 +61,8 @@ export type BorrowDoc = {
   status: BorrowStatus;
   reserved_at?: Date;
   pickup_due_at?: Date;
+  // 预约超期/取消等场景释放库存的幂等标记（首次回补库存时写入）
+  reservation_stock_released_at?: Date;
   borrowed_at?: Date;
   return_due_at?: Date;
   returned_at?: Date;

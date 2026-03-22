@@ -1,4 +1,5 @@
 import { borrowsCol, type BorrowDoc, type BorrowStatus } from '../db/collections.js';
+import { incrementBookStockOrThrow } from './book-stock.js';
 
 type BorrowDocLike = Partial<BorrowDoc> & Record<string, unknown>;
 
@@ -195,29 +196,60 @@ export async function migrateBorrowRecords(now = new Date()) {
 }
 
 export async function refreshBorrowOverdueStatuses(now = new Date()) {
-  await Promise.all([
-    borrowsCol().updateMany(
+  // 先刷新预约超期状态（后续需要对 reserve_overdue 记录做“库存释放”）
+  await borrowsCol().updateMany(
+    {
+      returned_at: { $exists: false },
+      status: 'reserved',
+      pickup_due_at: { $lt: now },
+    } as any,
+    { $set: { status: 'reserve_overdue', updated_at: now } },
+  );
+
+  // 释放“预约超期”占用的库存（幂等：reservation_stock_released_at 作为标记）
+  // 说明：不使用事务（演示项目），通过“先标记再回补 + 回滚标记”的方式尽量避免重复回补。
+  for (let i = 0; i < 200; i += 1) {
+    const claimed = await borrowsCol().findOneAndUpdate(
       {
         returned_at: { $exists: false },
-        status: 'reserved',
-        pickup_due_at: { $lt: now },
+        status: 'reserve_overdue',
+        reservation_stock_released_at: { $exists: false },
       } as any,
-      { $set: { status: 'reserve_overdue' } },
-    ),
+      { $set: { reservation_stock_released_at: now, updated_at: now } },
+      { returnDocument: 'before' },
+    );
+
+    if (!claimed) break;
+
+    const isbn = String((claimed as any).isbn ?? '').trim();
+    try {
+      await incrementBookStockOrThrow(isbn, 1);
+    } catch (error) {
+      console.warn('[borrows] release overdue reservation stock failed:', error);
+      await borrowsCol()
+        .updateOne(
+          { _id: (claimed as any)._id, reservation_stock_released_at: now } as any,
+          { $unset: { reservation_stock_released_at: '' }, $set: { updated_at: now } } as any,
+        )
+        .catch(() => {});
+    }
+  }
+
+  await Promise.all([
     borrowsCol().updateMany(
       {
         returned_at: { $exists: false },
         status: 'borrowed',
         return_due_at: { $lt: now },
       } as any,
-      { $set: { status: 'borrow_overdue' } },
+      { $set: { status: 'borrow_overdue', updated_at: now } },
     ),
     borrowsCol().updateMany(
       {
         returned_at: { $exists: true },
         status: { $ne: 'returned' },
       } as any,
-      { $set: { status: 'returned' } },
+      { $set: { status: 'returned', updated_at: now } },
     ),
   ]);
 }

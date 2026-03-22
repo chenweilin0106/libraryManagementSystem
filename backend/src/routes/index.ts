@@ -5,6 +5,7 @@ import { registerAnalyticsRoutes } from './analytics.js';
 import { registerBooksRoutes } from './books.js';
 import { registerBooksImportRoutes } from './books-import.js';
 import { registerBorrowsRoutes } from './borrows.js';
+import { registerDevSmokeRoutes } from './dev-smoke.js';
 import { registerHealthRoutes } from './health.js';
 import { registerMenuRoutes } from './menu.js';
 import { registerUserRoutes } from './user.js';
@@ -28,6 +29,7 @@ export function createApiRouter() {
   registerUsersImportRoutes(router);
   registerBorrowsRoutes(router);
   registerAnalyticsRoutes(router);
+  registerDevSmokeRoutes(router);
 
   return router;
 }

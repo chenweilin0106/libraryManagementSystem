@@ -109,7 +109,7 @@ export function registerBooksRoutes(router: Router) {
     if (title) filter.title = { $regex: toLikeRegex(title) };
     if (author) filter.author = { $regex: toLikeRegex(author) };
     if (isbn) filter.isbn = { $regex: toLikeRegex(isbn) };
-    if (category) filter.category = { $regex: toLikeRegex(category) };
+    if (category) filter.category = category;
 
     if (status === 'normal') filter.is_deleted = false;
     if (status === 'deleted') filter.is_deleted = true;
