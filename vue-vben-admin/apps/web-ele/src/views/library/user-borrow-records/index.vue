@@ -20,6 +20,7 @@ import {
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import type { BooksApi, BorrowsApi } from '#/api';
 import { cancelBorrowReservationApi, listBooksApi, listMyBorrowsApi } from '#/api';
+import { borrowStatusLabel, borrowStatusTagType } from '#/utils/borrow-status';
 import { normalizeDateRangeToMs } from '#/utils/date-range';
 
 defineOptions({ name: 'UserBorrowRecords' });
@@ -106,26 +107,6 @@ const [CancelDrawer, cancelDrawerApi] = useVbenDrawer({
   title: '取消预约',
 });
 
-
-function statusLabel(status: BorrowStatus) {
-  if (status === 'borrowed') return '借阅中';
-  if (status === 'borrow_overdue') return '借阅逾期';
-  if (status === 'returned') return '已归还';
-  if (status === 'reserved') return '待取书';
-  if (status === 'reserve_overdue') return '待取超期';
-  if (status === 'canceled') return '已取消';
-  return status;
-}
-
-function statusTagType(status: BorrowStatus) {
-  if (status === 'borrowed') return 'success';
-  if (status === 'borrow_overdue') return 'danger';
-  if (status === 'returned') return 'info';
-  if (status === 'reserved') return 'warning';
-  if (status === 'reserve_overdue') return 'danger';
-  if (status === 'canceled') return 'info';
-  return 'info';
-}
 
 function canCancel(row: BorrowRecord) {
   return (row.status === 'reserved' || row.status === 'reserve_overdue') && !row.returned_at;
@@ -500,8 +481,8 @@ async function onConfirmCancel() {
             {{ activeRecord.record_id }}
           </ElDescriptionsItem>
           <ElDescriptionsItem label="状态">
-            <ElTag :type="statusTagType(activeRecord.status)">
-              {{ statusLabel(activeRecord.status) }}
+            <ElTag :type="borrowStatusTagType(activeRecord.status)">
+              {{ borrowStatusLabel(activeRecord.status) }}
             </ElTag>
           </ElDescriptionsItem>
           <ElDescriptionsItem label="ISBN">
@@ -559,8 +540,8 @@ async function onConfirmCancel() {
 
     <Grid>
       <template #status="{ row }">
-        <ElTag :type="statusTagType(row.status)">
-          {{ statusLabel(row.status) }}
+        <ElTag :type="borrowStatusTagType(row.status)">
+          {{ borrowStatusLabel(row.status) }}
         </ElTag>
       </template>
 
@@ -589,8 +570,8 @@ async function onConfirmCancel() {
             {{ detailRecord.record_id }}
           </ElDescriptionsItem>
           <ElDescriptionsItem label="状态">
-            <ElTag :type="statusTagType(detailRecord.status)">
-              {{ statusLabel(detailRecord.status) }}
+            <ElTag :type="borrowStatusTagType(detailRecord.status)">
+              {{ borrowStatusLabel(detailRecord.status) }}
             </ElTag>
           </ElDescriptionsItem>
           <ElDescriptionsItem label="ISBN">

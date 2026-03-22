@@ -25,6 +25,7 @@ import {
   listBorrowsApi,
   returnBookApi,
 } from '#/api';
+import { borrowStatusLabel, borrowStatusTagType } from '#/utils/borrow-status';
 import { normalizeDateRangeToMs, toMsLocal } from '#/utils/date-range';
 
 defineOptions({ name: 'Borrows' });
@@ -75,39 +76,6 @@ function formatDateTimeString(date: Date) {
 
 function displayTime(value?: string) {
   return String(value ?? '').trim() || '-';
-}
-
-function statusLabel(status: BorrowStatus) {
-  switch (status) {
-    case 'reserved':
-      return '待取书';
-    case 'reserve_overdue':
-      return '待取超期';
-    case 'borrowed':
-      return '借阅中';
-    case 'borrow_overdue':
-      return '借阅逾期';
-    case 'returned':
-      return '已归还';
-    case 'canceled':
-      return '已取消';
-    default:
-      return status;
-  }
-}
-
-function statusTagType(status: BorrowStatus) {
-  switch (status) {
-    case 'reserved':
-      return 'warning';
-    case 'reserve_overdue':
-    case 'borrow_overdue':
-      return 'danger';
-    case 'borrowed':
-      return 'success';
-    default:
-      return 'info';
-  }
 }
 
 function canConfirmBorrow(record: BorrowRecord) {
@@ -905,8 +873,8 @@ async function onDrawerConfirm() {
               {{ activeRecord.record_id }}
             </ElDescriptionsItem>
             <ElDescriptionsItem label="状态">
-              <ElTag :type="statusTagType(activeRecord.status)">
-                {{ statusLabel(activeRecord.status) }}
+              <ElTag :type="borrowStatusTagType(activeRecord.status)">
+                {{ borrowStatusLabel(activeRecord.status) }}
               </ElTag>
             </ElDescriptionsItem>
             <ElDescriptionsItem label="用户名">
@@ -945,8 +913,8 @@ async function onDrawerConfirm() {
           {{ activeRecord.record_id }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="状态">
-          <ElTag :type="statusTagType(activeRecord.status)">
-            {{ statusLabel(activeRecord.status) }}
+          <ElTag :type="borrowStatusTagType(activeRecord.status)">
+            {{ borrowStatusLabel(activeRecord.status) }}
           </ElTag>
         </ElDescriptionsItem>
         <ElDescriptionsItem label="用户名">
@@ -976,8 +944,8 @@ async function onDrawerConfirm() {
       </template>
 
       <template #status="{ row }">
-        <ElTag :type="statusTagType(row.status)">
-          {{ statusLabel(row.status) }}
+        <ElTag :type="borrowStatusTagType(row.status)">
+          {{ borrowStatusLabel(row.status) }}
         </ElTag>
       </template>
 
@@ -1040,8 +1008,8 @@ async function onDrawerConfirm() {
           {{ detailRecord.record_id }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="状态">
-          <ElTag :type="statusTagType(detailRecord.status)">
-            {{ statusLabel(detailRecord.status) }}
+          <ElTag :type="borrowStatusTagType(detailRecord.status)">
+            {{ borrowStatusLabel(detailRecord.status) }}
           </ElTag>
         </ElDescriptionsItem>
         <ElDescriptionsItem label="用户ID">
