@@ -310,6 +310,13 @@ type BooksListResponseData = {
     total_stock: number;
     current_stock: number;
     is_deleted: boolean;
+    // 最近一次上/下架审计信息（演示项目：仅保留最后一次；未发生过则为 null）
+    shelved_at: string | null; // ISO
+    shelved_by_user_id: string | null;
+    shelved_by_username: string | null;
+    unshelved_at: string | null; // ISO
+    unshelved_by_user_id: string | null;
+    unshelved_by_username: string | null;
     created_at: string; // ISO
   }>;
   total: number;
@@ -372,6 +379,7 @@ Body：
 - 400：`is_deleted` 缺失或不是 boolean
 - 404：未找到图书
 - 409：存在未结束借阅/预约记录或库存未回收，禁止下架
+- 409：无可借库存，禁止上架
 
 ### 3.5 ISBN 查询（借书抽屉查询用）
 
@@ -471,8 +479,6 @@ type BooksImportCommitBody = {
   import_id: string;
   // 处理重复 ISBN 的策略（仅对“Excel 行命中老书”生效）
   conflict_strategy: 'increment_stock' | 'skip' | 'overwrite';
-  // 命中老书且本次 add_stock > 0 时是否自动上架（默认 true）
-  auto_unshelf?: boolean;
 };
 ```
 
