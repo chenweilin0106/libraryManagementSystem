@@ -12,6 +12,8 @@ import { ok } from '../utils/response.js';
 
 type ConflictStrategy = 'increment_stock' | 'skip' | 'overwrite';
 
+const OVERWRITE_BLOCKED_ERROR = '图书处于上架状态，禁止覆盖字段，请先下架';
+
 type ParsedRow = {
   row_number: number;
   isbn: string;
@@ -418,6 +420,17 @@ export function registerBooksImportRoutes(router: Router) {
       if (conflict_strategy === 'skip') {
         skipped += 1;
         items.push({ row_number: row.row_number, isbn, action: 'skipped' });
+        continue;
+      }
+
+      if (conflict_strategy === 'overwrite' && existing && !existing.is_deleted) {
+        failed += 1;
+        items.push({
+          row_number: row.row_number,
+          isbn,
+          action: 'failed',
+          error: OVERWRITE_BLOCKED_ERROR,
+        });
         continue;
       }
 

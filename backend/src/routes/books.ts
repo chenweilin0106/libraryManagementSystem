@@ -18,11 +18,22 @@ type BooksSortBy = 'created_at' | 'current_stock';
 type BooksSortOrder = 'asc' | 'desc';
 
 function toNonNegativeInt(value: unknown) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  const i = Math.floor(n);
-  if (i < 0) return null;
-  return i;
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) return null;
+    if (value < 0) return null;
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const str = value.trim();
+    if (!str) return null;
+    if (!/^\d+$/.test(str)) return null;
+    const n = Number(str);
+    if (!Number.isSafeInteger(n)) return null;
+    return n;
+  }
+
+  return null;
 }
 
 function normalizeText(value: unknown) {
@@ -170,16 +181,16 @@ export function registerBooksRoutes(router: Router) {
       });
     }
     if (totalStock === null) {
-      throwHttpError({ status: 400, message: 'BadRequest', error: 'total_stock 不合法' });
+      throwHttpError({ status: 400, message: 'BadRequest', error: '总库存不合法' });
     }
     if (currentStock === null) {
-      throwHttpError({ status: 400, message: 'BadRequest', error: 'current_stock 不合法' });
+      throwHttpError({ status: 400, message: 'BadRequest', error: '当前可借数量不合法' });
     }
     if (currentStock > totalStock) {
       throwHttpError({
         status: 400,
         message: 'BadRequest',
-        error: 'current_stock 不能大于 total_stock',
+        error: '当前可借数量不能大于总库存',
       });
     }
 
@@ -238,22 +249,29 @@ export function registerBooksRoutes(router: Router) {
       });
     }
     if (totalStock === null) {
-      throwHttpError({ status: 400, message: 'BadRequest', error: 'total_stock 不合法' });
+      throwHttpError({ status: 400, message: 'BadRequest', error: '总库存不合法' });
     }
     if (currentStock === null) {
-      throwHttpError({ status: 400, message: 'BadRequest', error: 'current_stock 不合法' });
+      throwHttpError({ status: 400, message: 'BadRequest', error: '当前可借数量不合法' });
     }
     if (currentStock > totalStock) {
       throwHttpError({
         status: 400,
         message: 'BadRequest',
-        error: 'current_stock 不能大于 total_stock',
+        error: '当前可借数量不能大于总库存',
       });
     }
 
     const existing = await booksCol().findOne({ isbn: originalIsbn });
     if (!existing) {
       throwHttpError({ status: 404, message: 'NotFound', error: '图书不存在' });
+    }
+    if (!existing.is_deleted) {
+      throwHttpError({
+        status: 409,
+        message: 'Conflict',
+        error: '图书处于上架状态，禁止编辑，请先下架',
+      });
     }
 
     if (nextIsbn !== originalIsbn) {
