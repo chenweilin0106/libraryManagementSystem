@@ -78,7 +78,8 @@ export function createBook(
     ...input,
     cover_url: String(input.cover_url ?? '').trim(),
     created_at: now,
-    is_deleted: false,
+    // 约定：新书入库默认下架，需管理员手动上架
+    is_deleted: true,
     isbn,
   };
   books.unshift(book);

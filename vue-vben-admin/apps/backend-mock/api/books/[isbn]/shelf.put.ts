@@ -1,7 +1,7 @@
 import { defineEventHandler, readBody, setResponseStatus } from 'h3';
 
 import { verifyAccessToken } from '~/utils/jwt-utils';
-import { setBookShelf } from '~/utils/library-books';
+import { findBookByIsbn, setBookShelf } from '~/utils/library-books';
 import {
   sleep,
   unAuthorizedResponse,
@@ -31,7 +31,27 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = (await readBody(event)) ?? {};
-  const is_deleted = Boolean(body.is_deleted);
+  const isDeletedRaw = (body as any).is_deleted as unknown;
+  if (typeof isDeletedRaw !== 'boolean') {
+    setResponseStatus(event, 400);
+    return useResponseError('BadRequestException', 'is_deleted 必须为 boolean');
+  }
+  const is_deleted = isDeletedRaw;
+
+  const existing = findBookByIsbn(isbn);
+  if (!existing) {
+    setResponseStatus(event, 404);
+    return useResponseError('NotFoundException', '未找到该 ISBN 对应图书');
+  }
+
+  // 对齐真实后端：上架需有可借库存
+  if (!is_deleted && existing.is_deleted && (existing.current_stock ?? 0) <= 0) {
+    setResponseStatus(event, 409);
+    return useResponseError(
+      'ConflictException',
+      `无可借库存（${existing.current_stock}/${existing.total_stock}），禁止上架`,
+    );
+  }
 
   const { error } = setBookShelf(isbn, is_deleted);
   if (error) {
@@ -41,4 +61,3 @@ export default defineEventHandler(async (event) => {
 
   return useResponseSuccess(null);
 });
-
