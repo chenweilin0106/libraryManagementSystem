@@ -98,6 +98,26 @@ async function findBookByIsbn(isbn: string) {
   return await booksCol().findOne({ isbn });
 }
 
+async function findBookIsbnsByFilters(input: { author: string; category: string; title: string }) {
+  const title = normalizeText(input.title);
+  const author = normalizeText(input.author);
+  const category = normalizeText(input.category);
+  if (!title && !author && !category) return null;
+
+  const filter: Record<string, unknown> = {};
+  if (title) filter.title = { $regex: toLikeRegex(title) };
+  if (author) filter.author = { $regex: toLikeRegex(author) };
+  if (category) filter.category = category;
+
+  const books = await booksCol()
+    .find(filter as any, { projection: { isbn: 1 } })
+    .toArray();
+
+  return books
+    .map((b: any) => String(b?.isbn ?? '').trim())
+    .filter((isbn) => isbn);
+}
+
 async function normalizeBorrowDoc(doc: WithId<BorrowDoc> | null, now: Date) {
   if (!doc) return null;
   const patch = buildBorrowMigrationPatch(doc as any, now);
@@ -139,6 +159,7 @@ function statusFilterValue(status: string, now: Date): Filter<BorrowDoc> | null 
 function buildListFilter(input: {
   borrowEnd: number;
   borrowStart: number;
+  bookIsbns?: string[] | null;
   isbn: string;
   now: Date;
   returnEnd: number;
@@ -146,25 +167,29 @@ function buildListFilter(input: {
   status: string;
   username?: string;
 }) {
-  const filter: Filter<BorrowDoc> = {};
-  if (input.username) filter.username = { $regex: toLikeRegex(input.username) } as any;
-  if (input.isbn) filter.isbn = { $regex: toLikeRegex(input.isbn) } as any;
+  const clauses: Filter<BorrowDoc>[] = [];
+  if (input.username) clauses.push({ username: { $regex: toLikeRegex(input.username) } } as any);
+  if (input.isbn) clauses.push({ isbn: { $regex: toLikeRegex(input.isbn) } } as any);
+  if (input.bookIsbns) clauses.push({ isbn: { $in: input.bookIsbns } } as any);
 
   const statusFilter = statusFilterValue(input.status, input.now);
-  if (statusFilter) Object.assign(filter, statusFilter);
+  if (statusFilter) clauses.push(statusFilter);
 
   if (Number.isFinite(input.borrowStart) || Number.isFinite(input.borrowEnd)) {
-    filter.borrow_date = {} as any;
-    if (Number.isFinite(input.borrowStart)) (filter.borrow_date as any).$gte = new Date(input.borrowStart);
-    if (Number.isFinite(input.borrowEnd)) (filter.borrow_date as any).$lte = new Date(input.borrowEnd);
+    const range: Record<string, unknown> = {};
+    if (Number.isFinite(input.borrowStart)) range.$gte = new Date(input.borrowStart);
+    if (Number.isFinite(input.borrowEnd)) range.$lte = new Date(input.borrowEnd);
+    clauses.push({ borrow_date: range } as any);
   }
   if (Number.isFinite(input.returnStart) || Number.isFinite(input.returnEnd)) {
-    filter.return_date = {} as any;
-    if (Number.isFinite(input.returnStart)) (filter.return_date as any).$gte = new Date(input.returnStart);
-    if (Number.isFinite(input.returnEnd)) (filter.return_date as any).$lte = new Date(input.returnEnd);
+    const range: Record<string, unknown> = {};
+    if (Number.isFinite(input.returnStart)) range.$gte = new Date(input.returnStart);
+    if (Number.isFinite(input.returnEnd)) range.$lte = new Date(input.returnEnd);
+    clauses.push({ return_date: range } as any);
   }
 
-  return filter;
+  if (clauses.length === 0) return {};
+  return { $and: clauses } as any;
 }
 
 function buildSort(sortBy: BorrowsSortBy, sortOrder: BorrowsSortOrder) {
@@ -192,6 +217,9 @@ export function registerBorrowsRoutes(router: Router) {
     const skip = (page - 1) * pageSize;
     const username = normalizeText(ctx.query.username);
     const isbn = normalizeText(ctx.query.isbn);
+    const title = normalizeText(ctx.query.title);
+    const author = normalizeText(ctx.query.author);
+    const category = normalizeText(ctx.query.category);
     const status = normalizeText(ctx.query.status);
     const borrowStart = Number(ctx.query.borrowStart);
     const borrowEnd = Number(ctx.query.borrowEnd);
@@ -200,9 +228,11 @@ export function registerBorrowsRoutes(router: Router) {
     const sortBy = parseSortBy(ctx.query.sortBy) ?? 'created_at';
     const sortOrder = parseSortOrder(ctx.query.sortOrder) ?? 'desc';
 
+    const bookIsbns = await findBookIsbnsByFilters({ author, category, title });
     const filter = buildListFilter({
       borrowEnd,
       borrowStart,
+      bookIsbns,
       isbn,
       now,
       returnEnd,
@@ -213,8 +243,10 @@ export function registerBorrowsRoutes(router: Router) {
 
     const cacheKey = await buildBorrowsListCacheKey({
       query: {
+        author,
         borrowEnd,
         borrowStart,
+        category,
         isbn,
         page,
         pageSize,
@@ -223,6 +255,7 @@ export function registerBorrowsRoutes(router: Router) {
         sortBy,
         sortOrder,
         status,
+        title,
         username,
       },
     });
@@ -254,6 +287,9 @@ export function registerBorrowsRoutes(router: Router) {
     const pageSize = clampPageSize(Number(ctx.query.pageSize), 20, 100);
     const skip = (page - 1) * pageSize;
     const isbn = normalizeText(ctx.query.isbn);
+    const title = normalizeText(ctx.query.title);
+    const author = normalizeText(ctx.query.author);
+    const category = normalizeText(ctx.query.category);
     const status = normalizeText(ctx.query.status);
     const borrowStart = Number(ctx.query.borrowStart);
     const borrowEnd = Number(ctx.query.borrowEnd);
@@ -262,9 +298,11 @@ export function registerBorrowsRoutes(router: Router) {
     const sortBy = parseSortBy(ctx.query.sortBy) ?? 'created_at';
     const sortOrder = parseSortOrder(ctx.query.sortOrder) ?? 'desc';
 
+    const bookIsbns = await findBookIsbnsByFilters({ author, category, title });
     const filter = buildListFilter({
       borrowEnd,
       borrowStart,
+      bookIsbns,
       isbn,
       now,
       returnEnd,
@@ -275,8 +313,10 @@ export function registerBorrowsRoutes(router: Router) {
 
     const cacheKey = await buildBorrowsMyCacheKey({
       query: {
+        author,
         borrowEnd,
         borrowStart,
+        category,
         isbn,
         page,
         pageSize,
@@ -285,6 +325,7 @@ export function registerBorrowsRoutes(router: Router) {
         sortBy,
         sortOrder,
         status,
+        title,
       },
       userId: auth.userId,
     });

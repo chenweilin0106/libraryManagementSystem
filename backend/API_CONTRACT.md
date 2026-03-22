@@ -533,6 +533,7 @@ Query：
 - `page`, `pageSize`
 - `username?`
 - `isbn?`
+- `title?`, `author?`, `category?`
 - `status?`: `'all' | 'reserved' | 'reserve_overdue' | 'borrowed' | 'borrow_overdue' | 'returned' | 'canceled'`
 - `borrowStart?`, `borrowEnd?`（毫秒）
 - `returnStart?`, `returnEnd?`（毫秒）
@@ -588,6 +589,7 @@ Query：
 
 - `page`, `pageSize`
 - `isbn?`
+- `title?`, `author?`, `category?`
 - `status?`: `'all' | 'reserved' | 'reserve_overdue' | 'borrowed' | 'borrow_overdue' | 'returned' | 'canceled'`
 - `borrowStart?`, `borrowEnd?`（毫秒）
 - `returnStart?`, `returnEnd?`（毫秒）
