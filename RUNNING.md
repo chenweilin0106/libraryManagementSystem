@@ -75,12 +75,7 @@ REDIS_DEFAULT_TTL_SECONDS=30
 - Redis 不可用/连接失败会自动降级为“不走缓存”，不影响接口正确性。
 - 已缓存的接口：`/api/books`、`/api/books/:isbn`、`/api/analytics/overview`、`/api/users`、`/api/borrows`、`/api/borrows/my`。
 
-### 4.2 （可选）热门图书榜单（论文：`rank:hot_books`）
-
-- 借阅成功时会递增榜单计数（ZSET）。
-- 管理员接口：`GET /api/analytics/hot-books?limit=10`
-
-### 4.3 （可选）Redis 限流（论文：`limit:req:{ip}`）
+### 4.2 （可选）Redis 限流（论文：`limit:req:{ip}`）
 
 默认关闭；需要时在 `backend/.env` 开启（建议只保护较重接口，如 analytics）：
 
@@ -91,7 +86,7 @@ RATE_LIMIT_MAX_REQUESTS=60
 ```
 
 说明：
-- 当前已对 `GET /api/analytics/overview`、`GET /api/analytics/hot-books` 接入限流；超限返回 HTTP `429`。
+- 当前已对 `GET /api/analytics/overview` 接入限流；超限返回 HTTP `429`。
 
 ## 常见问题
 

@@ -1,7 +1,7 @@
 # Redis 开发记录
 
 ## 适用范围
-- 功能：Redis 接入、缓存、热门图书榜单、限流、一键启动中的 Redis 启动逻辑。
+- 功能：Redis 接入、缓存、限流、一键启动中的 Redis 启动逻辑。
 - 相关文件：
   - `docker/redis/compose.yml`
   - `backend/src/db/redis.ts`
@@ -12,7 +12,7 @@
 
 ## 当前状态
 - 已接入开发环境 Redis（Docker）。
-- 已落地缓存、热门图书榜单、限流。
+- 已落地缓存、限流。
 - `start-dev.ps1` 已支持在 Docker 引擎未就绪时自动尝试拉起 Docker Desktop 并等待。
 
 ## 目录
@@ -29,10 +29,9 @@
 - 开发环境通过 Docker Desktop / WSL2 启动 Redis 容器。
 
 ### 论文需求对齐
-- 热点数据缓存：查询结果、热门图书。
+- 热点数据缓存：查询结果。
 - 数据分析缓存：统计类接口结果。
 - 键值示例：
-  - 热门图书榜单：`rank:hot_books`
   - 限流：`limit:req:{ip}`
 - JWT 黑名单暂不纳入本次范围，避免与现有 refresh 轮换策略重复。
 
@@ -47,7 +46,6 @@
   - `GET /api/borrows/my`
   - `GET /api/borrows`
   - `GET /api/users`
-- 新增热门图书榜单接口：`GET /api/analytics/hot-books`
 - 新增可开关限流（当前先保护 analytics 相关接口）。
 
 ### 不包含
@@ -88,11 +86,6 @@
   - `cache:borrows:list:v{ver}:{hash}`
   - `cache:users:list:v{ver}:{hash}`
 
-#### 热门图书榜单
-- 榜单 key：`rank:hot_books`
-- 借阅成功时通过 `ZINCRBY` 递增。
-- Redis 不可用或榜单为空时，接口回退到 MongoDB 聚合统计。
-
 #### 限流
 - key 形态：`limit:req:{ip}:{scope}`
 - 采用固定窗口：
@@ -100,13 +93,11 @@
   - 超过阈值返回 `429`
 - 当前保护接口：
   - `GET /api/analytics/overview`
-  - `GET /api/analytics/hot-books`
 
 ### 验收点
 - Redis 容器可稳定启动并返回 `PONG`
 - `REDIS_ENABLED=1` 时缓存可命中；关闭或 Redis 宕机时接口仍正常
 - 写操作后对应缓存能通过版本号立即失效
-- 热门图书榜单可返回结果
 - 限流开启后可正确返回 `429`
 
 ### 冒烟记录
@@ -137,12 +128,6 @@
   - 各接口均生成对应缓存 key
   - `INCR lms:ver:books` 后生成新版本 key，符合预期
 
-#### 2026-03-14：热门图书榜单
-- 接口：`GET /api/analytics/hot-books?limit=10`
-- 结果：
-  - Redis 榜单为空时可回退 Mongo 聚合
-  - 完成一次借阅后，`ZSCORE rank:hot_books B-<isbn>` 递增为 `1`
-
 #### 2026-03-14：限流
 - 参数：
   - `RATE_LIMIT_ENABLED=1`
@@ -153,6 +138,18 @@
 - 结果：
   - 第 1、2 次返回 `200`
   - 第 3 次返回 `429`
+
+---
+
+## 2026-03-22 v1.2
+
+### 范围
+- 移除未被页面使用的热门图书榜单接口：`GET /api/analytics/hot-books`。
+- 同步移除相关 Redis ZSET 统计逻辑（`rank:hot_books`）与借阅成功时的递增动作。
+
+### 验收点
+- 后端不再暴露 `/api/analytics/hot-books`。
+- Redis 仅保留缓存与限流相关 key，不再依赖 `rank:hot_books`。
 
 ---
 

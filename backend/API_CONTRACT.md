@@ -30,20 +30,18 @@
 ```json
 {
   "code": 0,
-  "data": {},
-  "error": null,
-  "message": "ok"
+  "message": "ok",
+  "data": {}
 }
 ```
 
-失败示例（`code === -1`）：
+失败示例（以 HTTP 403 为例；业务上仍应保持正确的 HTTP 状态码）：
 
 ```json
 {
-  "code": -1,
-  "data": null,
-  "error": "xxx",
-  "message": "SomeErrorType"
+  "code": 403,
+  "message": "用户名或密码错误",
+  "data": null
 }
 ```
 
@@ -98,11 +96,10 @@
 ```json
 {
   "code": 0,
+  "message": "ok",
   "data": {
     "accessToken": "xxx"
-  },
-  "error": null,
-  "message": "ok"
+  }
 }
 ```
 
@@ -340,7 +337,7 @@ type CreateBookBody = {
   author: string;
   introduction?: string;  // 简介（可选，<= 300 字）
   category: string;
-  cover_url: string;
+  cover_url: string;      // http(s) URL 或以 / 开头；为空时后端默认 /covers/cover-placeholder.svg
   total_stock: number;    // >= 0 的整数
   current_stock: number;  // >= 0 的整数 且 <= total_stock
 };
@@ -348,7 +345,7 @@ type CreateBookBody = {
 
 错误约束（建议与 mock 一致）：
 
-- 400：字段为空 / `总库存不合法` / `当前可借数量不合法` / `当前可借数量不能大于总库存`
+- 400：字段为空 / `总库存不合法` / `当前可借数量不合法` / `当前可借数量不能大于总库存` / `cover_url` 格式不合法
 - 409：ISBN 已存在
 
 ### 3.3 编辑图书
@@ -424,7 +421,7 @@ Excel 模板列（第一行表头，字段名大小写不敏感）：
 - `author`（新书必填；老书可空）
 - `introduction` 或 `简介`（可空，<= 300 字；仅在新书创建/覆盖策略下写入）
 - `category`（新书必填；老书可空）
-- `cover_url`（可空，线上图片 URL）
+- `cover_url`（可空；http(s) URL 或以 / 开头；为空时新书默认 /covers/cover-placeholder.svg）
 - `add_stock`（必填，>= 1，本次入库数量）
 
 响应（data 解包后）：
@@ -660,7 +657,7 @@ type BorrowBookResponseData = {
 - 图书下架（409）
 - 无库存（409）
 - 同一用户同一本书存在未归还记录：不可重复借（409）
-- 用户存在“逾期未处理（fine_amount>0 且 overdue 且未归还）”记录：禁止借阅（409）
+- 用户存在“逾期未处理（`status in reserve_overdue/borrow_overdue` 且未归还）”记录：禁止借阅（409）
 
 并发/一致性建议：
 
@@ -822,6 +819,11 @@ Body 同新增。
 - `admin` 仅允许重置 `user`
 - `super` 允许重置 `admin | user`
 
+重要说明（会话策略）：
+
+- 重置密码成功后，服务端会删除该用户的所有会话（access/refresh 同时失效）
+- 前端需要提示用户并要求其重新登录
+
 错误：
 
 - 404：用户不存在
@@ -979,38 +981,6 @@ type AnalyticsOverviewResponseData = {
   topCategories: Array<{ name: string; value: number }>;
 };
 ```
-
-### 6.2 热门图书榜单（可选，用于性能优化/论文展示）
-
-`GET /api/analytics/hot-books`
-
-权限：
-- 管理员接口（`role=admin`）
-
-Query：
-
-- `limit?`: number，默认 10，最大 50
-
-响应（data 解包后）：
-
-```ts
-type AnalyticsHotBooksResponseData = {
-  items: Array<{
-    book_id: string; // `B-${isbn}`
-    isbn: string;
-    title: string;
-    category: string;
-    cover_url: string;
-    borrow_count: number;
-  }>;
-};
-```
-
-说明：
-- 若 Redis 已启用并有数据，榜单基于 Redis ZSET（论文键：`rank:hot_books`，实际 key 会带前缀）。
-- 若 Redis 未启用或暂无榜单数据，会回退到 MongoDB 聚合统计（仅用于保证接口可用）。
-
----
 
 ## 7. 状态码建议（与 mock 对齐）
 

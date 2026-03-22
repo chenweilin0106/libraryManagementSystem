@@ -10,7 +10,7 @@
 
 ## 接口格式与字段命名约定（重要）
 - 接口格式、字段命名、状态枚举、时间字段含义等，必须以 `backend/API_CONTRACT.md` 为准；前后端保持一致，禁止同一含义出现多套命名。
-- 通用响应体：默认使用 `{ code, data, error, message }`（前端 `requestClient` 依赖该结构做解包/错误提示）。
+- 通用响应体：默认使用 `{ code, message, data }`（前端 `requestClient` 依赖该结构做解包/错误提示）。
   - 例外：如确需返回“非通用结构”（例如纯文本 token），必须在 `backend/API_CONTRACT.md` 明确标注，并在前端使用对应的基础请求客户端（避免解包失败）。
 - 字段命名统一使用 `snake_case`（如 `book_title/current_stock/created_at`），并在以下场景保持一致：
   - 列表分页：`page/pageSize`
@@ -43,10 +43,9 @@
   - Redis：若检测 Docker 引擎不可用，会尝试拉起 Docker Desktop 并等待就绪（最多 120s），再启动容器。
   - codex：tab 入口为 `pwsh`（外观与其它 tab 一致），随后进入 WSL 启动 `codex`；`codex` 退出后保留 WSL shell（退出 WSL 后回到 PowerShell）。
 
-## Redis（缓存/榜单/限流）
+## Redis（缓存/限流）
 - Redis（Docker）启动：见 `RUNNING.md` 的“4)（可选）启动 Redis”
 - 后端启用 Redis 缓存：在 `backend/.env` 配置 `REDIS_ENABLED=1`（默认关闭）
-- 热门图书榜单（论文 `rank:hot_books`）：管理员接口 `GET /api/analytics/hot-books`
 - Redis 限流（论文 `limit:req:{ip}`）：在 `backend/.env` 配置 `RATE_LIMIT_ENABLED=1`（默认关闭），超限返回 `429`
 
 ### 后端（backend）
