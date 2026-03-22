@@ -341,14 +341,14 @@ type CreateBookBody = {
   introduction?: string;  // 简介（可选，<= 300 字）
   category: string;
   cover_url: string;
-  total_stock: number;    // >= 0
-  current_stock: number;  // >= 0 且 <= total_stock
+  total_stock: number;    // >= 0 的整数
+  current_stock: number;  // >= 0 的整数 且 <= total_stock
 };
 ```
 
 错误约束（建议与 mock 一致）：
 
-- 400：字段为空 / `total_stock` 不合法 / `current_stock` 不合法 / `current_stock > total_stock`
+- 400：字段为空 / `总库存不合法` / `当前可借数量不合法` / `当前可借数量不能大于总库存`
 - 409：ISBN 已存在
 
 ### 3.3 编辑图书
@@ -361,7 +361,7 @@ Body 同新增。
 
 - 400：参数不合法
 - 404：未找到原 ISBN
-- 409：将 ISBN 修改为已存在的 ISBN
+- 409：将 ISBN 修改为已存在的 ISBN / 图书处于上架状态，禁止编辑，请先下架
 
 ### 3.4 上/下架（软删除）
 
@@ -480,6 +480,7 @@ type BooksImportPreviewResponseData = {
 
 - 对“新书行（Excel 命中不存在的 ISBN）”：创建新书后默认处于“已下架”（`is_deleted=true`）状态，需管理员手动上架。
 - 对“老书行（Excel 命中已存在的 ISBN）”：仅处理库存与字段覆盖策略，不修改该书当前 `is_deleted`（保持上/下架状态不变）。
+- 额外规则：当 `conflict_strategy=overwrite` 且命中“上架老书”（`is_deleted=false`）时，该行直接失败（`action=failed`），提示 `图书处于上架状态，禁止覆盖字段，请先下架`。
 
 Body：
 
