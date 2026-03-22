@@ -327,6 +327,10 @@ type BooksListResponseData = {
 
 `POST /api/books`
 
+说明：
+
+- 新书入库默认处于“已下架”（`is_deleted=true`）状态，需管理员手动调用上架接口（`PUT /api/books/:isbn/shelf`，`{ "is_deleted": false }`）后，用户端才可预约/借阅。
+
 Body：
 
 ```ts
@@ -471,6 +475,11 @@ type BooksImportPreviewResponseData = {
 ### 3.8 Excel 导入提交（批量入库）
 
 `POST /api/books/import/commit`
+
+说明：
+
+- 对“新书行（Excel 命中不存在的 ISBN）”：创建新书后默认处于“已下架”（`is_deleted=true`）状态，需管理员手动上架。
+- 对“老书行（Excel 命中已存在的 ISBN）”：仅处理库存与字段覆盖策略，不修改该书当前 `is_deleted`（保持上/下架状态不变）。
 
 Body：
 
