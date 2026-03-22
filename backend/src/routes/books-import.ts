@@ -293,11 +293,10 @@ export function registerBooksImportRoutes(router: Router) {
   });
 
   router.post('/books/import/commit', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const import_id = String(body.import_id ?? '').trim();
     const conflict_strategy = body.conflict_strategy;
-    const auto_unshelf = body.auto_unshelf == null ? true : Boolean(body.auto_unshelf);
 
     if (!import_id) {
       throwHttpError({ status: 400, message: 'BadRequest', error: '缺少 import_id' });
@@ -370,6 +369,9 @@ export function registerBooksImportRoutes(router: Router) {
             total_stock: delta,
             current_stock: delta,
             is_deleted: false,
+            shelved_at: now,
+            shelved_by_user_id: auth.userId,
+            shelved_by_username: auth.username,
             created_at: now,
           } as any);
           created += 1;
@@ -421,15 +423,12 @@ export function registerBooksImportRoutes(router: Router) {
         continue;
       }
 
-      const shouldUnshelf = auto_unshelf && delta > 0 && Boolean(existingMap.get(isbn)?.is_deleted);
       const inc = { total_stock: delta, current_stock: delta };
 
       if (conflict_strategy === 'increment_stock') {
         const result = await booksCol().updateOne(
           { isbn },
-          shouldUnshelf
-            ? { $inc: inc, $set: { is_deleted: false } }
-            : { $inc: inc },
+          { $inc: inc },
         );
         if (result.matchedCount === 0) {
           failed += 1;
@@ -438,7 +437,6 @@ export function registerBooksImportRoutes(router: Router) {
         }
         incremented += 1;
         items.push({ row_number: row.row_number, isbn, action: 'incremented' });
-        existingMap.set(isbn, { ...(existingMap.get(isbn) as any), is_deleted: false } as any);
         continue;
       }
 
@@ -448,7 +446,6 @@ export function registerBooksImportRoutes(router: Router) {
       if (row.introduction) set.introduction = row.introduction;
       if (row.category) set.category = row.category;
       if (row.cover_url) set.cover_url = row.cover_url;
-      if (shouldUnshelf) set.is_deleted = false;
 
       const update =
         Object.keys(set).length > 0 ? { $inc: inc, $set: set } : { $inc: inc };

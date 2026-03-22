@@ -56,8 +56,14 @@ function bookToApi(doc: BookDoc) {
     introduction: doc.introduction ?? '',
     is_deleted: doc.is_deleted,
     isbn: doc.isbn,
+    shelved_at: doc.shelved_at ? doc.shelved_at.toISOString() : null,
+    shelved_by_user_id: doc.shelved_by_user_id ?? null,
+    shelved_by_username: doc.shelved_by_username ?? null,
     title: doc.title,
     total_stock: doc.total_stock,
+    unshelved_at: doc.unshelved_at ? doc.unshelved_at.toISOString() : null,
+    unshelved_by_user_id: doc.unshelved_by_user_id ?? null,
+    unshelved_by_username: doc.unshelved_by_username ?? null,
   };
 }
 
@@ -142,7 +148,7 @@ export function registerBooksRoutes(router: Router) {
   });
 
   router.post('/books', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const isbn = normalizeText(body.isbn);
     const title = normalizeText(body.title);
@@ -189,6 +195,9 @@ export function registerBooksRoutes(router: Router) {
         total_stock: totalStock,
         current_stock: currentStock,
         is_deleted: false,
+        shelved_at: now,
+        shelved_by_user_id: auth.userId,
+        shelved_by_username: auth.username,
         created_at: now,
       } as any);
 
@@ -278,7 +287,7 @@ export function registerBooksRoutes(router: Router) {
   });
 
   router.put('/books/:isbn/shelf', async (ctx) => {
-    requireAdmin(ctx);
+    const auth = requireAdmin(ctx);
     const isbn = String(ctx.params.isbn ?? '').trim();
     if (!isbn) {
       throwHttpError({ status: 400, message: 'BadRequest', error: 'ISBN 不能为空' });
@@ -296,6 +305,17 @@ export function registerBooksRoutes(router: Router) {
     );
     if (!book) {
       throwHttpError({ status: 404, message: 'NotFound', error: '图书不存在' });
+    }
+
+    // 上架：要求有可借库存（演示项目：用 current_stock 兜底数据一致性）
+    if (!isDeleted && book.is_deleted) {
+      if (book.current_stock <= 0) {
+        throwHttpError({
+          status: 409,
+          message: 'Conflict',
+          error: `无可借库存（${book.current_stock}/${book.total_stock}），禁止上架`,
+        });
+      }
     }
 
     if (isDeleted && !book.is_deleted) {
@@ -328,7 +348,18 @@ export function registerBooksRoutes(router: Router) {
       return;
     }
 
-    await booksCol().updateOne({ _id: book._id }, { $set: { is_deleted: isDeleted } });
+    const now = new Date();
+    const set: Record<string, any> = { is_deleted: isDeleted };
+    if (isDeleted) {
+      set.unshelved_at = now;
+      set.unshelved_by_user_id = auth.userId;
+      set.unshelved_by_username = auth.username;
+    } else {
+      set.shelved_at = now;
+      set.shelved_by_user_id = auth.userId;
+      set.shelved_by_username = auth.username;
+    }
+    await booksCol().updateOne({ _id: book._id }, { $set: set });
     void bumpRedisVersion('books').catch(() => {});
     ok(ctx, null);
   });

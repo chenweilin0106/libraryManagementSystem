@@ -32,6 +32,13 @@ export type BookDoc = {
   total_stock: number;
   current_stock: number;
   is_deleted: boolean;
+  // 最近一次上/下架审计信息（演示项目：仅保留最后一次）
+  shelved_at?: Date;
+  shelved_by_user_id?: string;
+  shelved_by_username?: string;
+  unshelved_at?: Date;
+  unshelved_by_user_id?: string;
+  unshelved_by_username?: string;
   created_at: Date;
 };
 
