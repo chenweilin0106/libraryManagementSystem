@@ -502,7 +502,7 @@ async function main() {
   });
 
   let recordIdB = '';
-  await step('用户再次预约 /api/borrows/reserve', async () => {
+  await step('用户预约（用于超期释放库存验证）/api/borrows/reserve', async () => {
     const { res, json } = await request({
       baseUrl,
       path: '/api/borrows/reserve',
@@ -518,6 +518,108 @@ async function main() {
     const recordId = pick(record, 'record_id');
     assert(typeof recordId === 'string' && recordId, 'reserve again：record_id 为空');
     recordIdB = recordId;
+  });
+
+  await step('强制该预约超期 /api/dev/smoke/borrows/force-reserve-overdue', async () => {
+    const { res, json } = await request({
+      baseUrl,
+      path: '/api/dev/smoke/borrows/force-reserve-overdue',
+      method: 'POST',
+      token: adminToken2,
+      json: { record_id: recordIdB },
+      timeoutMs: args.timeoutMs,
+      verbose: args.verbose,
+    });
+    ensureStatus(res.status, 200, 'force reserve overdue');
+    const body = ensureOk(
+      ensureJsonBody(json, res.status, 'force reserve overdue'),
+      'force reserve overdue',
+    );
+    const data = pick(body, 'data');
+    assert(pick(data, 'status') === 'reserve_overdue', 'force reserve overdue：status 非 reserve_overdue');
+    const releasedAt = pick(data, 'reservation_stock_released_at');
+    assert(releasedAt, 'force reserve overdue：reservation_stock_released_at 为空（库存可能未释放）');
+  });
+
+  await step('校验超期后库存已释放 /api/books/:isbn', async () => {
+    const { res, json } = await request({
+      baseUrl,
+      path: `/api/books/${encodeURIComponent(createdBookIsbn)}`,
+      method: 'GET',
+      token: adminToken2,
+      timeoutMs: args.timeoutMs,
+      verbose: args.verbose,
+    });
+    ensureStatus(res.status, 200, 'book detail after overdue');
+    const body = ensureOk(
+      ensureJsonBody(json, res.status, 'book detail after overdue'),
+      'book detail after overdue',
+    );
+    const currentStock = pick(pick(body, 'data'), 'current_stock');
+    const totalStock = pick(pick(body, 'data'), 'total_stock');
+    assert(currentStock === totalStock, `book detail after overdue：库存不一致 ${currentStock}/${totalStock}`);
+  });
+
+  await step('取消超期预约不重复回补库存 /api/borrows/:recordId/cancel', async () => {
+    const { res, json } = await request({
+      baseUrl,
+      path: `/api/borrows/${encodeURIComponent(recordIdB)}/cancel`,
+      method: 'PUT',
+      token: userToken,
+      timeoutMs: args.timeoutMs,
+      verbose: args.verbose,
+    });
+    ensureStatus(res.status, 200, 'cancel overdue reserve');
+    const body = ensureOk(
+      ensureJsonBody(json, res.status, 'cancel overdue reserve'),
+      'cancel overdue reserve',
+    );
+    const status = pick(pick(body, 'data'), 'status');
+    assert(status === 'canceled', `cancel overdue reserve：status=${String(status)}`);
+  });
+
+  await step('校验取消超期预约后库存仍等于 total_stock /api/books/:isbn', async () => {
+    const { res, json } = await request({
+      baseUrl,
+      path: `/api/books/${encodeURIComponent(createdBookIsbn)}`,
+      method: 'GET',
+      token: adminToken2,
+      timeoutMs: args.timeoutMs,
+      verbose: args.verbose,
+    });
+    ensureStatus(res.status, 200, 'book detail after cancel overdue');
+    const body = ensureOk(
+      ensureJsonBody(json, res.status, 'book detail after cancel overdue'),
+      'book detail after cancel overdue',
+    );
+    const currentStock = pick(pick(body, 'data'), 'current_stock');
+    const totalStock = pick(pick(body, 'data'), 'total_stock');
+    assert(
+      currentStock === totalStock,
+      `book detail after cancel overdue：库存不一致 ${currentStock}/${totalStock}`,
+    );
+  });
+
+  let recordIdC = '';
+  await step('用户再次预约（用于借出/还书链路）/api/borrows/reserve', async () => {
+    const { res, json } = await request({
+      baseUrl,
+      path: '/api/borrows/reserve',
+      method: 'POST',
+      token: userToken,
+      json: { isbn: createdBookIsbn },
+      timeoutMs: args.timeoutMs,
+      verbose: args.verbose,
+    });
+    ensureStatus(res.status, 200, 'reserve for borrow flow');
+    const body = ensureOk(
+      ensureJsonBody(json, res.status, 'reserve for borrow flow'),
+      'reserve for borrow flow',
+    );
+    const record = pick(pick(body, 'data'), 'record');
+    const recordId = pick(record, 'record_id');
+    assert(typeof recordId === 'string' && recordId, 'reserve for borrow flow：record_id 为空');
+    recordIdC = recordId;
   });
 
   await step('管理员确认借出 /api/borrows/borrow', async () => {
@@ -542,7 +644,7 @@ async function main() {
   await step('管理员还书 /api/borrows/:recordId/return', async () => {
     const { res, json } = await request({
       baseUrl,
-      path: `/api/borrows/${encodeURIComponent(recordIdB)}/return`,
+      path: `/api/borrows/${encodeURIComponent(recordIdC)}/return`,
       method: 'PUT',
       token: adminToken2,
       json: { fine_amount: 0 },
@@ -715,4 +817,3 @@ main()
     }
     process.exitCode = 1;
   });
-
