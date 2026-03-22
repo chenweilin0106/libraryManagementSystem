@@ -17,14 +17,16 @@ import {
 } from 'element-plus';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import type { BooksApi } from '#/api';
-import { listBooksApi, reserveBorrowApi } from '#/api';
+import type { BooksApi, BorrowsApi } from '#/api';
+import { listBooksApi, listMyBorrowsApi, reserveBorrowApi } from '#/api';
 
 defineOptions({ name: 'UserReservations' });
 
 type Book = BooksApi.Book;
 type BookSortBy = NonNullable<BooksApi.ListParams['sortBy']>;
 type BookSortOrder = NonNullable<BooksApi.ListParams['sortOrder']>;
+type BorrowStatus = BorrowsApi.BorrowStatus;
+type BorrowRecord = BorrowsApi.BorrowRecord;
 
 const CATEGORY_OPTIONS = [
   { label: '计算机', value: '计算机' },
@@ -37,6 +39,7 @@ const CATEGORY_OPTIONS = [
 const reservingIsbn = ref<string>('');
 const gridPager = ref({ currentPage: 1, pageSize: 20 });
 const activeBook = ref<Book | null>(null);
+const blockingReserveByIsbn = ref<Map<string, BorrowStatus>>(new Map());
 const DEFAULT_GRID_SORT: { field: BookSortBy; order: BookSortOrder } = {
   field: 'created_at',
   order: 'desc',
@@ -260,6 +263,7 @@ const gridEvents: VxeGridListeners<Book> = {
   },
   toolbarToolClick: ({ code }) => {
     if (code !== 'refresh') return;
+    void loadBlockingReserveIsbns();
     resetGridSortToDefault();
   },
 };
@@ -287,13 +291,59 @@ function refresh() {
   gridApi.query();
 }
 
+async function loadBlockingReserveIsbns() {
+  const statuses: BorrowStatus[] = [
+    'reserved',
+    'reserve_overdue',
+    'borrowed',
+    'borrow_overdue',
+  ];
+
+  const settled = await Promise.allSettled(
+    statuses.map(async (status) => {
+      const result = await listMyBorrowsApi({
+        page: 1,
+        pageSize: 100,
+        status,
+      });
+      return {
+        items: (Array.isArray(result?.items) ? result.items : []) as BorrowRecord[],
+        status,
+      };
+    }),
+  );
+
+  const next = new Map<string, BorrowStatus>();
+  settled.forEach((s) => {
+    if (s.status !== 'fulfilled') return;
+    s.value.items.forEach((record) => {
+      const isbn = String(record?.isbn ?? '').trim();
+      if (!isbn) return;
+      next.set(isbn, s.value.status);
+    });
+  });
+
+  blockingReserveByIsbn.value = next;
+}
+
+function isBlockingReserve(book: Book) {
+  return blockingReserveByIsbn.value.has(book.isbn);
+}
+
 function canReserve(row: Book) {
-  return (row.current_stock ?? 0) > 0;
+  return (row.current_stock ?? 0) > 0 && !isBlockingReserve(row);
 }
 
 function canReserveActiveBook() {
   const book = activeBook.value;
   return book ? canReserve(book) : false;
+}
+
+function reserveButtonLabel(row: Book) {
+  const status = blockingReserveByIsbn.value.get(row.isbn);
+  if (status === 'reserved' || status === 'reserve_overdue') return '已预约';
+  if (status === 'borrowed' || status === 'borrow_overdue') return '借阅中';
+  return '预约';
 }
 
 function openReserveDrawer(row: Book) {
@@ -328,6 +378,7 @@ async function onConfirmReserve() {
     await reserveBorrowApi({ isbn: book.isbn });
     drawerApi.close();
     ElMessage.success('预约成功');
+    await loadBlockingReserveIsbns().catch(() => {});
     refresh();
   } catch {
     return;
@@ -336,6 +387,8 @@ async function onConfirmReserve() {
     reservingIsbn.value = '';
   }
 }
+
+void loadBlockingReserveIsbns();
 </script>
 
 <template>
@@ -411,14 +464,17 @@ async function onConfirmReserve() {
       </template>
 
       <template #actions="{ row }">
-        <ElButton
-          :disabled="!canReserve(row) || reservingIsbn === row.isbn"
-          :loading="reservingIsbn === row.isbn"
-          type="primary"
-          @click="openReserveDrawer(row)"
-        >
-          预约
-        </ElButton>
+        <div class="flex items-center justify-center gap-2">
+          <ElButton
+            :disabled="!canReserve(row) || reservingIsbn === row.isbn"
+            :loading="reservingIsbn === row.isbn"
+            link
+            type="primary"
+            @click="openReserveDrawer(row)"
+          >
+            {{ reserveButtonLabel(row) }}
+          </ElButton>
+        </div>
       </template>
     </Grid>
   </Page>

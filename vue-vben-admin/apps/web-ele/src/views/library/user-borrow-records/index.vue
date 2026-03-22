@@ -8,6 +8,7 @@ import { Page, useVbenDrawer } from '@vben/common-ui';
 
 import {
   ElButton,
+  ElDialog,
   ElDescriptions,
   ElDescriptionsItem,
   ElImage,
@@ -32,6 +33,10 @@ const gridPager = ref({ currentPage: 1, pageSize: 20 });
 const cancelingRecordId = ref<string>('');
 const activeRecord = ref<BorrowRecord | null>(null);
 const activeBook = ref<Book | null>(null);
+const detailOpen = ref(false);
+const detailRecord = ref<BorrowRecord | null>(null);
+const detailBook = ref<Book | null>(null);
+const detailToken = ref(0);
 const DEFAULT_GRID_SORT: { field: BorrowSortBy; order: BorrowSortOrder } = {
   field: 'borrow_date',
   order: 'desc',
@@ -69,6 +74,22 @@ function onActiveCoverError() {
   const book = activeBook.value;
   if (!book) return;
   markCoverLoadFailed(book.isbn);
+}
+
+function getDetailBookCoverSrc() {
+  const book = detailBook.value;
+  return book ? getBookCoverSrc(book) : COVER_PLACEHOLDER_SRC;
+}
+
+function onDetailCoverError() {
+  const book = detailBook.value;
+  if (!book) return;
+  markCoverLoadFailed(book.isbn);
+}
+
+function displayTime(value: unknown) {
+  const normalized = String(value ?? '').trim();
+  return normalized ? normalized : '（无）';
 }
 
 const [CancelDrawer, cancelDrawerApi] = useVbenDrawer({
@@ -181,6 +202,14 @@ const STATUS_OPTIONS: Array<{ label: string; value: BorrowStatus | 'all' }> = [
   { label: '已取消', value: 'canceled' },
 ];
 
+const CATEGORY_OPTIONS = [
+  { label: '计算机', value: '计算机' },
+  { label: '文学', value: '文学' },
+  { label: '历史', value: '历史' },
+  { label: '经济', value: '经济' },
+  { label: '其他', value: '其他' },
+];
+
 const gridFormOptions: VbenFormProps = {
   collapsed: false,
   handleReset: async () => {
@@ -197,6 +226,29 @@ const gridFormOptions: VbenFormProps = {
       componentProps: { placeholder: '请输入 ISBN' },
       fieldName: 'isbn',
       label: 'ISBN',
+    },
+    {
+      component: 'Input',
+      componentProps: { placeholder: '请输入书名' },
+      fieldName: 'title',
+      label: '书名',
+    },
+    {
+      component: 'Input',
+      componentProps: { placeholder: '请输入作者' },
+      fieldName: 'author',
+      label: '作者',
+    },
+    {
+      component: 'Select',
+      componentProps: {
+        clearable: true,
+        filterable: true,
+        options: CATEGORY_OPTIONS,
+        placeholder: '请选择类别',
+      },
+      fieldName: 'category',
+      label: '类别',
     },
     {
       component: 'Select',
@@ -220,6 +272,18 @@ const gridFormOptions: VbenFormProps = {
       },
       fieldName: 'borrow_date_range',
       label: '预约/借出时间',
+    },
+    {
+      component: 'DatePicker',
+      componentProps: {
+        clearable: true,
+        endPlaceholder: '结束日期',
+        startPlaceholder: '开始日期',
+        type: 'daterange',
+        valueFormat: 'YYYY-MM-DD',
+      },
+      fieldName: 'return_date_range',
+      label: '实际归还时间',
     },
   ],
   showCollapseButton: true,
@@ -261,7 +325,7 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
       fixed: 'right',
       slots: { default: 'actions' },
       title: '操作',
-      width: 120,
+      width: 160,
     },
   ],
   height: 'auto',
@@ -300,16 +364,22 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
         }
 
         const borrowRange = normalizeRange(formValues.borrow_date_range);
+        const returnRange = normalizeRange(formValues.return_date_range);
 
         return await listMyBorrowsApi({
+          author: formValues.author,
           borrowEnd: borrowRange?.[1],
           borrowStart: borrowRange?.[0],
+          category: formValues.category,
           isbn: formValues.isbn,
           page: page.currentPage,
           pageSize: page.pageSize,
+          returnEnd: returnRange?.[1],
+          returnStart: returnRange?.[0],
           sortBy: gridSortState.value.field,
           sortOrder: gridSortState.value.order,
           status: String(formValues.status ?? 'all') as BorrowStatus | 'all',
+          title: formValues.title,
         });
       },
       querySuccess: async () => {
@@ -374,6 +444,29 @@ async function syncGridSortIndicator() {
 
 function refresh() {
   gridApi.query();
+}
+
+async function openDetail(row: BorrowRecord) {
+  detailToken.value += 1;
+  const token = detailToken.value;
+  detailRecord.value = row;
+  detailBook.value = null;
+  detailOpen.value = true;
+
+  try {
+    const book = await loadBookByIsbn(row.isbn);
+    if (detailToken.value !== token) return;
+    detailBook.value = book;
+  } catch {
+    if (detailToken.value !== token) return;
+    detailBook.value = null;
+  }
+}
+
+function onDetailClosed() {
+  detailToken.value += 1;
+  detailRecord.value = null;
+  detailBook.value = null;
 }
 
 async function openCancelDrawer(row: BorrowRecord) {
@@ -514,15 +607,100 @@ async function onConfirmCancel() {
       </template>
 
       <template #actions="{ row }">
-        <ElButton
-          :disabled="!canCancel(row) || cancelingRecordId === row.record_id"
-          :loading="cancelingRecordId === row.record_id"
-          type="danger"
-          @click="openCancelDrawer(row)"
-        >
-          取消预约
-        </ElButton>
+        <div class="flex items-center justify-center gap-2">
+          <ElButton link type="primary" @click="openDetail(row)">详情</ElButton>
+          <ElButton
+            v-if="canCancel(row)"
+            :disabled="cancelingRecordId === row.record_id"
+            :loading="cancelingRecordId === row.record_id"
+            link
+            type="danger"
+            @click="openCancelDrawer(row)"
+          >
+            取消预约
+          </ElButton>
+        </div>
       </template>
     </Grid>
+
+    <ElDialog v-model="detailOpen" title="借阅详情" width="860px" @closed="onDetailClosed">
+      <div class="space-y-3">
+        <div class="text-sm font-medium">记录信息</div>
+        <ElDescriptions v-if="detailRecord" :column="2" border>
+          <ElDescriptionsItem label="记录ID">
+            {{ detailRecord.record_id }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="状态">
+            <ElTag :type="statusTagType(detailRecord.status)">
+              {{ statusLabel(detailRecord.status) }}
+            </ElTag>
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="ISBN">
+            {{ detailRecord.isbn }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="书名">
+            {{ detailRecord.book_title }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="预约/借出时间">
+            {{ displayTime(detailRecord.borrow_date) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="待取/应还时间">
+            {{ displayTime(detailRecord.due_date) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="归还时间">
+            {{ displayTime(detailRecord.returned_at) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="罚金">
+            {{ detailRecord.fine_amount ?? 0 }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="预约时间">
+            {{ displayTime(detailRecord.reserved_at) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="待取截止时间">
+            {{ displayTime(detailRecord.pickup_due_at) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="借出时间">
+            {{ displayTime(detailRecord.borrowed_at) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="应还时间">
+            {{ displayTime(detailRecord.return_due_at) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="借阅期限（天）">
+            {{ detailRecord.borrow_days ?? '（无）' }}
+          </ElDescriptionsItem>
+        </ElDescriptions>
+
+        <div class="text-sm font-medium">图书信息</div>
+        <ElDescriptions :column="1" border>
+          <ElDescriptionsItem label="作者">
+            {{ detailBook?.author || '（未知）' }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="类别">
+            {{ detailBook?.category || '（未知）' }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="库存">
+            <ElTag :type="(detailBook?.current_stock ?? 0) > 0 ? 'success' : 'danger'">
+              {{ detailBook?.current_stock ?? 0 }}
+            </ElTag>
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="简介">
+            {{ detailBook?.introduction?.trim() ? detailBook?.introduction : '（无）' }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="封面">
+            <div class="flex items-center justify-center py-2">
+              <ElImage
+                :preview-src-list="[getDetailBookCoverSrc()]"
+                :preview-teleported="true"
+                :src="getDetailBookCoverSrc()"
+                class="cursor-pointer"
+                fit="cover"
+                style="width: 96px; height: 128px"
+                @error="onDetailCoverError"
+              />
+            </div>
+          </ElDescriptionsItem>
+        </ElDescriptions>
+      </div>
+    </ElDialog>
   </Page>
 </template>

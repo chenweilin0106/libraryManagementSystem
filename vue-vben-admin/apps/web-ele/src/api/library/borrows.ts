@@ -35,8 +35,10 @@ export namespace BorrowsApi {
   }
 
   export interface ListParams {
+    author?: string;
     borrowEnd?: number;
     borrowStart?: number;
+    category?: string;
     isbn?: string;
     page?: number;
     pageSize?: number;
@@ -54,6 +56,7 @@ export namespace BorrowsApi {
       | 'returned_at';
     sortOrder?: 'asc' | 'desc';
     status?: BorrowStatus | 'all';
+    title?: string;
     username?: string;
   }
 
