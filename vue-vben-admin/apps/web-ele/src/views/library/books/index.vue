@@ -11,6 +11,8 @@ import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
 
 import {
   ElButton,
+  ElDescriptions,
+  ElDescriptionsItem,
   ElDialog,
   ElImage,
   ElMessage,
@@ -71,6 +73,8 @@ const deletingIsbn = ref<string>('');
 const uploadFileList = ref<any[]>([]);
 const coverPreviewUrl = ref<string>('');
 const coverPreviewOpen = ref(false);
+const detailBook = ref<Book | null>(null);
+const detailOpen = ref(false);
 const importPreviewLoading = ref(false);
 const importCommitLoading = ref(false);
 const importPreviewData = ref<BooksApi.ImportPreviewResponseData | null>(null);
@@ -107,6 +111,14 @@ const [ImportPreviewModal, importPreviewModalApi] = useVbenModal({
   },
   title: '导入预览',
 });
+
+function isOverwriteBlockedRow(row: ImportPreviewRow) {
+  return (
+    importConflictStrategy.value === 'overwrite' &&
+    row.exists &&
+    row.existing_is_deleted === false
+  );
+}
 
 function getOrCreateManagedObjectUrl(raw: File) {
   const existing = rawObjectUrlMap.get(raw);
@@ -165,11 +177,11 @@ function releaseCoverObjectUrl(url: string) {
 }
 
 const drawerTitle = computed(() =>
-  drawerMode.value === 'create' ? '新书入库' : '编辑图书',
+  drawerMode.value === 'create' ? '新增图书' : '编辑图书',
 );
 const drawerConfirmText = computed(() => {
   if (drawerMode.value === 'create' && drawerActiveTab.value === 'import') return '上传';
-  if (drawerMode.value === 'create') return '入库';
+  if (drawerMode.value === 'create') return '新增';
   return '保存';
 });
 
@@ -237,13 +249,15 @@ const bookFormSchema: VbenFormSchema[] = [
     },
     fieldName: 'cover_files',
     label: '封面',
-    rules: 'required',
   },
   {
     component: 'InputNumber',
     componentProps: {
       min: 0,
       placeholder: '请输入总库存',
+      precision: 0,
+      step: 1,
+      stepStrictly: true,
     },
     fieldName: 'total_stock',
     label: '总库存',
@@ -251,9 +265,27 @@ const bookFormSchema: VbenFormSchema[] = [
   },
   {
     component: 'InputNumber',
-    componentProps: {
-      min: 0,
-      placeholder: '请输入当前可借数量',
+    componentProps: (values) => {
+      const max = Number.isSafeInteger(values?.total_stock) ? values.total_stock : undefined;
+      return {
+        max,
+        min: 0,
+        placeholder: '请输入当前可借数量',
+        precision: 0,
+        step: 1,
+        stepStrictly: true,
+      };
+    },
+    dependencies: {
+      triggerFields: ['current_stock', 'total_stock'],
+      async trigger(values, actions) {
+        const totalStock = values?.total_stock;
+        const currentStock = values?.current_stock;
+        if (!Number.isSafeInteger(totalStock) || totalStock < 0) return;
+        if (!Number.isSafeInteger(currentStock) || currentStock < 0) return;
+        if (currentStock <= totalStock) return;
+        await actions.setFieldValue('current_stock', totalStock, false);
+      },
     },
     fieldName: 'current_stock',
     label: '当前可借',
@@ -352,6 +384,10 @@ function getCoverSrc(url: string) {
   return url?.trim() ? url : COVER_PLACEHOLDER_SRC;
 }
 
+function displayTime(value?: string | null) {
+  return String(value ?? '').trim() || '-';
+}
+
 function markCoverLoadFailed(isbn: string) {
   const normalized = String(isbn ?? '').trim();
   if (!normalized) return;
@@ -400,6 +436,7 @@ function getImportRowAction(row: ImportPreviewRow) {
   if (!row.is_valid) return 'failed';
   if (!row.exists) return 'created';
   if (importConflictStrategy.value === 'skip') return 'skipped';
+  if (isOverwriteBlockedRow(row)) return 'failed';
   if (importConflictStrategy.value === 'overwrite') return 'overwritten';
   return 'incremented';
 }
@@ -424,6 +461,19 @@ function resetImportPreview() {
   } catch {
     // ignore
   }
+}
+
+function syncImportConfirmDisabledState() {
+  const rows = importPreviewData.value?.rows ?? [];
+  const canCommit = rows.some((row) => {
+    if (!row.is_valid) return false;
+    if (!row.exists) return true;
+    if (importConflictStrategy.value === 'skip') return true;
+    if (importConflictStrategy.value === 'increment_stock') return true;
+    if (importConflictStrategy.value === 'overwrite') return !isOverwriteBlockedRow(row);
+    return false;
+  });
+  importPreviewModalApi.setState({ confirmDisabled: !canCommit });
 }
 
 async function onImportCommit() {
@@ -457,6 +507,10 @@ async function onImportCommit() {
     });
   }
 }
+
+watch([importConflictStrategy, importPreviewData], () => {
+  syncImportConfirmDisabledState();
+});
 
 async function resolveCoverUrlForSubmit(coverFile?: UploadFile) {
   if (!coverFile) return '';
@@ -782,6 +836,15 @@ function refresh() {
   gridApi.query();
 }
 
+function openDetail(row: Book) {
+  detailBook.value = row;
+  detailOpen.value = true;
+}
+
+function onDetailClosed() {
+  detailBook.value = null;
+}
+
 function onCreate() {
   drawerMode.value = 'create';
   drawerActiveTab.value = 'manual';
@@ -810,6 +873,10 @@ function onCreate() {
 }
 
 function onEdit(row: Book) {
+  if (!row.is_deleted) {
+    openDetail(row);
+    return;
+  }
   drawerMode.value = 'edit';
   drawerActiveTab.value = 'manual';
   editingOriginalIsbn.value = row.isbn;
@@ -1059,7 +1126,7 @@ async function onDrawerConfirm() {
     if (drawerMode.value === 'create') {
       await createBookApi(payload);
       retainCoverObjectUrl(coverUrl);
-      ElMessage.success('入库成功');
+      ElMessage.success('新增成功');
     } else {
       const originalIsbn = editingOriginalIsbn.value;
       if (!originalIsbn) return;
@@ -1224,7 +1291,10 @@ onBeforeUnmount(() => {
 
       <template #actions="{ row }">
         <div class="flex items-center justify-center gap-2">
-          <ElButton link type="primary" @click="onEdit(row)">编辑</ElButton>
+          <ElButton v-if="row.is_deleted" link type="primary" @click="onEdit(row)">
+            编辑
+          </ElButton>
+          <ElButton v-else link type="primary" @click="openDetail(row)">详情</ElButton>
           <ElButton v-if="row.is_deleted" link type="success" @click="onUpShelf(row)">
             上架
           </ElButton>
@@ -1235,6 +1305,51 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </Grid>
+
+    <ElDialog v-model="detailOpen" title="图书详情" width="820px" @closed="onDetailClosed">
+      <ElDescriptions v-if="detailBook" :column="2" border>
+        <ElDescriptionsItem label="ISBN">{{ detailBook.isbn }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="状态">
+          <ElTag v-if="detailBook.is_deleted" type="danger">已下架</ElTag>
+          <ElTag v-else type="success">正常</ElTag>
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="书名">{{ detailBook.title }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="作者">{{ detailBook.author }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="类别">{{ detailBook.category }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="总库存">{{ detailBook.total_stock }}</ElDescriptionsItem>
+        <ElDescriptionsItem label="当前可借">{{ detailBook.current_stock }}</ElDescriptionsItem>
+        <ElDescriptionsItem :span="2" label="封面">
+          <ElImage
+            :src="getTableCoverSrc(detailBook)"
+            :preview-src-list="[getTableCoverSrc(detailBook)]"
+            :preview-teleported="true"
+            class="cursor-pointer"
+            fit="cover"
+            style="width: 96px; height: 128px"
+            @error="markCoverLoadFailed(detailBook.isbn)"
+          />
+        </ElDescriptionsItem>
+        <ElDescriptionsItem :span="2" label="简介">
+          {{ detailBook.introduction?.trim() ? detailBook.introduction : '-' }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="入库时间">
+          {{ displayTime(detailBook.created_at) }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="最近上架">
+          {{ displayTime(detailBook.shelved_at) }}
+          <span v-if="detailBook.shelved_by_username">
+            （{{ detailBook.shelved_by_username }}）
+          </span>
+        </ElDescriptionsItem>
+        <ElDescriptionsItem label="最近下架">
+          {{ displayTime(detailBook.unshelved_at) }}
+          <span v-if="detailBook.unshelved_by_username">
+            （{{ detailBook.unshelved_by_username }}）
+          </span>
+        </ElDescriptionsItem>
+      </ElDescriptions>
+    </ElDialog>
+
     <ElDialog v-model="coverPreviewOpen" title="封面预览" width="560px">
       <div class="flex items-center justify-center">
         <img
@@ -1296,7 +1411,10 @@ onBeforeUnmount(() => {
             </template>
 
             <template #import-errors="{ row }">
-              <span v-if="row.errors?.length" class="text-red-500">
+              <span v-if="isOverwriteBlockedRow(row)" class="text-red-500">
+                图书处于上架状态，禁止覆盖字段，请先下架
+              </span>
+              <span v-else-if="row.errors?.length" class="text-red-500">
                 {{ row.errors.join('；') }}
               </span>
               <ElTag v-else type="success">通过</ElTag>
