@@ -148,7 +148,7 @@ export function registerBooksRoutes(router: Router) {
   });
 
   router.post('/books', async (ctx) => {
-    const auth = requireAdmin(ctx);
+    requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const isbn = normalizeText(body.isbn);
     const title = normalizeText(body.title);
@@ -194,10 +194,8 @@ export function registerBooksRoutes(router: Router) {
         cover_url: coverUrl,
         total_stock: totalStock,
         current_stock: currentStock,
-        is_deleted: false,
-        shelved_at: now,
-        shelved_by_user_id: auth.userId,
-        shelved_by_username: auth.username,
+        // 约定：新书入库默认下架，需管理员手动上架
+        is_deleted: true,
         created_at: now,
       } as any);
 

@@ -293,7 +293,7 @@ export function registerBooksImportRoutes(router: Router) {
   });
 
   router.post('/books/import/commit', async (ctx) => {
-    const auth = requireAdmin(ctx);
+    requireAdmin(ctx);
     const body = (ctx.request as any).body ?? {};
     const import_id = String(body.import_id ?? '').trim();
     const conflict_strategy = body.conflict_strategy;
@@ -368,10 +368,8 @@ export function registerBooksImportRoutes(router: Router) {
             cover_url: row.cover_url,
             total_stock: delta,
             current_stock: delta,
-            is_deleted: false,
-            shelved_at: now,
-            shelved_by_user_id: auth.userId,
-            shelved_by_username: auth.username,
+            // 约定：导入新书默认下架，需管理员手动上架
+            is_deleted: true,
             created_at: now,
           } as any);
           created += 1;
@@ -384,7 +382,7 @@ export function registerBooksImportRoutes(router: Router) {
               author: row.author,
               category: row.category,
               cover_url: row.cover_url,
-              is_deleted: false,
+              is_deleted: true,
             } as any,
           );
           continue;
@@ -413,7 +411,7 @@ export function registerBooksImportRoutes(router: Router) {
               } as any,
             },
           );
-          existingMap.set(isbn, (doc ?? { isbn, is_deleted: false }) as any);
+          existingMap.set(isbn, (doc ?? { isbn, is_deleted: true }) as any);
         }
       }
 
