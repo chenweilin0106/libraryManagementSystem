@@ -699,7 +699,12 @@ type ReserveBookBody = {
 
 业务约束：
 - 仅 `status='reserved' | 'reserve_overdue'` 的记录允许取消（409）
-- 取消成功需要**回补库存**（`current_stock + 1`，不超过 `total_stock`）
+- 取消成功会**回补库存（幂等）**：
+  - `reserved`：回补库存（`current_stock + 1`，不超过 `total_stock`）
+  - `reserve_overdue`：
+    - 若该记录的库存尚未释放，则回补库存；
+    - 若库存已被“预约超期自动释放”或已回补过，则**不重复回补**。
+  - 说明：后端使用 `borrows.reservation_stock_released_at` 作为幂等标记（该字段不在接口响应体中返回）。
 
 成功返回：`BorrowRecord`
 
@@ -991,3 +996,35 @@ type AnalyticsOverviewResponseData = {
 - `404`: 资源不存在
 - `409`: 冲突（重复创建、重复借阅、状态不允许变更等）
 - `429`: 请求过于频繁（可选：Redis 限流）
+
+---
+
+## 附录 A. 开发/冒烟辅助接口（dev-only）
+
+> 说明：该类接口不被前端业务依赖，仅用于冒烟脚本或开发联调。
+>
+> 安全约束：
+> - 仅在 `NODE_ENV !== 'production'` 时可用（生产环境返回 404）。
+> - 需要管理员鉴权（`Authorization: Bearer <accessToken>`）。
+
+### A.1 强制预约超期（用于验证“超期释放库存 + 取消幂等”）
+
+`POST /api/dev/smoke/borrows/force-reserve-overdue`
+
+Body：
+
+```ts
+type ForceReserveOverdueBody = {
+  record_id: string;
+};
+```
+
+成功响应（data 解包后）：
+
+```ts
+type ForceReserveOverdueResponseData = {
+  record_id: string;
+  status: string; // 期望为 reserve_overdue
+  reservation_stock_released_at: string | null; // ISO；若库存释放成功则为非空
+};
+```
