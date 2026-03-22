@@ -8,6 +8,17 @@
 ## 后端接口契约
 - 接口契约文档：`backend/API_CONTRACT.md`（后端需与当前前端请求形态对齐）
 
+## 接口格式与字段命名约定（重要）
+- 接口格式、字段命名、状态枚举、时间字段含义等，必须以 `backend/API_CONTRACT.md` 为准；前后端保持一致，禁止同一含义出现多套命名。
+- 通用响应体：默认使用 `{ code, data, error, message }`（前端 `requestClient` 依赖该结构做解包/错误提示）。
+  - 例外：如确需返回“非通用结构”（例如纯文本 token），必须在 `backend/API_CONTRACT.md` 明确标注，并在前端使用对应的基础请求客户端（避免解包失败）。
+- 字段命名统一使用 `snake_case`（如 `book_title/current_stock/created_at`），并在以下场景保持一致：
+  - 列表分页：`page/pageSize`
+  - 排序：`sortBy/sortOrder`
+  - 时间范围筛选（毫秒）：`xxxStart/xxxEnd`（如 `borrowStart/borrowEnd`、`returnStart/returnEnd`）
+  - 图书筛选：`isbn/title/author/category`
+  - 借阅记录接口对齐：`GET /api/borrows` 与 `GET /api/borrows/my` 的 Query 尽量同名（`/my` 忽略管理员专有字段如 `username`）
+
 ## 前端当前约定（已裁剪后的目标形态）
 - 管理员端仅保留 4 个一级业务路由：
   - `/analytics`（数据分析）
@@ -162,6 +173,82 @@
 - **页面层**：表格页统一用 `<Page auto-content-height>` 限制内容区高度，让内容区滚动而不是整页增长。
 - **表格层**：`gridOptions.height: 'auto'`，不要写死像素高度（除非你明确想要固定高度的表格容器）。
 
+### 表格组件与基础配置（VxeGrid）
+- 统一组件：通过 `useVbenVxeGrid` 使用 VxeGrid（见：`vue-vben-admin/apps/web-ele/src/views/library/*/index.vue`）。
+- 基础推荐配置（按页面需要增减）：
+  - `height: 'auto'`
+  - `keepSource: true`（编辑类表格需要）
+  - `showOverflow: true`（单元格溢出省略）
+  - `rowConfig.keyField`：必填（例如 `isbn` / `record_id`）
+  - `seqConfig.seqMethod`：分页序号从 1 递增（跨页连续）
+  - `toolbarConfig`：常用 `custom/refresh/search/zoom`
+  - `proxyConfig.ajax.query`：统一在这里拼装后端 Query，并把分页/排序/筛选集中管理
+  - `sortConfig.remote: true` + `proxyConfig.sort: true`：远程排序
+
+示例（最小骨架）：
+```ts
+const gridOptions: VxeGridProps<Row> = {
+  height: 'auto',
+  keepSource: true,
+  showOverflow: true,
+  rowConfig: { keyField: 'id' },
+  pagerConfig: {},
+  sortConfig: { remote: true, defaultSort: { field: 'created_at', order: 'desc' } },
+  proxyConfig: {
+    sort: true,
+    ajax: {
+      query: async ({ page, sort }, formValues) => {
+        return await listApi({
+          page: page.currentPage,
+          pageSize: page.pageSize,
+          sortBy: sort?.field,
+          sortOrder: sort?.order,
+          ...formValues,
+        });
+      },
+    },
+  },
+  toolbarConfig: { custom: true, refresh: true, search: true, zoom: true, export: false },
+  columns: [],
+};
+```
+
+### 列表页查询表单（首页查询表单）使用与结构
+约定：列表页的“查询表单”统一由 `VbenForm` 托管，并通过 `useVbenVxeGrid({ formOptions })` 绑定到表格上方；表单字段名与后端 Query 参数保持一致。
+
+推荐结构：
+- `const gridFormOptions: VbenFormProps = { ... }`
+  - `schema`：字段配置数组（`fieldName/label/component/componentProps`）
+  - `submitButtonOptions: { content: '搜索' }`
+  - `resetButtonOptions: { content: '重置' }`
+  - `collapsed/showCollapseButton/submitOnEnter`：保持与现有页面一致
+  - `handleReset`：必须 `resetForm()` 后重新 `getValues()`，并 `setLatestSubmissionValues()` 再 `reload()`（避免“重置后仍用旧筛选值”）
+- 在 `proxyConfig.ajax.query` 中读取 `formValues` 并映射为后端 Query：
+  - 日期范围：表单一般用 `DatePicker(daterange) + valueFormat: 'YYYY-MM-DD'`，再在 query 中转换为 `xxxStart/xxxEnd`（毫秒，闭区间；end 需扩展到当天 `23:59:59.999`，见 `backend/API_CONTRACT.md`）。
+
+示例（字段名/placeholder 与现有页面对齐）：
+```ts
+const gridFormOptions: VbenFormProps = {
+  collapsed: false,
+  showCollapseButton: true,
+  submitOnEnter: true,
+  submitButtonOptions: { content: '搜索' },
+  resetButtonOptions: { content: '重置' },
+  handleReset: async () => {
+    await gridApi.formApi.resetForm();
+    const values = await gridApi.formApi.getValues();
+    gridApi.formApi.setLatestSubmissionValues(values);
+    await gridApi.reload(values);
+  },
+  schema: [
+    { component: 'Input', fieldName: 'isbn', label: 'ISBN', componentProps: { placeholder: '请输入 ISBN' } },
+    { component: 'Input', fieldName: 'title', label: '书名', componentProps: { placeholder: '请输入书名' } },
+    { component: 'Input', fieldName: 'author', label: '作者', componentProps: { placeholder: '请输入作者' } },
+    { component: 'Select', fieldName: 'category', label: '类别', componentProps: { placeholder: '请选择类别', clearable: true } },
+  ],
+};
+```
+
 最小示例（Page 限高 + Table 自适应）：
 ```text
 <script lang="ts" setup>
@@ -236,6 +323,10 @@ const [Grid] = useVbenVxeGrid({ gridOptions });
   </div>
 </template>
 ```
+
+### 抽屉右下角按钮（统一约定）
+- 优先使用 `useVbenDrawer` 提供的抽屉底部按钮（`cancelText/confirmText/onCancel/onConfirm`），保持所有抽屉的右下角按钮布局与交互一致。
+- 非必要不自定义抽屉 footer；如必须自定义，按钮文案/主次关系也需保持与 `useVbenDrawer` 默认一致（取消在左、确认在右）。
 
 ### 数据操作
 - 所有“会改变数据”的操作（新增/编辑/删除/下架/上架/借阅/还书/预约/取消预约等）默认需要二次确认：
