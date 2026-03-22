@@ -20,6 +20,7 @@ import {
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import type { BooksApi, BorrowsApi } from '#/api';
 import { cancelBorrowReservationApi, listBooksApi, listMyBorrowsApi } from '#/api';
+import { normalizeDateRangeToMs } from '#/utils/date-range';
 
 defineOptions({ name: 'UserBorrowRecords' });
 
@@ -105,49 +106,6 @@ const [CancelDrawer, cancelDrawerApi] = useVbenDrawer({
   title: '取消预约',
 });
 
-function toMs(value: unknown) {
-  if (!value) return null;
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const str = String(value).trim();
-  if (!str) return null;
-
-  // 约定：按“本地时区”解析，避免 YYYY-MM-DD 被当成 UTC 导致跨天误差
-  const normalized = str.replace(/\//g, '-');
-  const m = normalized.match(
-    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
-  );
-  if (m) {
-    const year = Number(m[1]);
-    const month = Number(m[2]);
-    const day = Number(m[3]);
-    const hour = m[4] ? Number(m[4]) : 0;
-    const minute = m[5] ? Number(m[5]) : 0;
-    const second = m[6] ? Number(m[6]) : 0;
-    const ms = new Date(year, month - 1, day, hour, minute, second).getTime();
-    return Number.isFinite(ms) ? ms : null;
-  }
-
-  // 兜底：解析 ISO / 其他格式
-  const asDate = new Date(str);
-  const ms = asDate.getTime();
-  return Number.isFinite(ms) ? ms : null;
-}
-
-function normalizeRange(range: unknown) {
-  if (!Array.isArray(range) || range.length < 2) return null;
-  const startMs = toMs(range[0]);
-  const endRaw = range[1];
-  const endStr = typeof endRaw === 'string' ? endRaw.trim() : '';
-  const endMs = toMs(endRaw);
-  if (startMs === null || endMs === null) return null;
-
-  // daterange 常见是 YYYY-MM-DD，结束时间补到当天 23:59:59.999
-  if (endStr && /^\d{4}-\d{2}-\d{2}$/.test(endStr)) {
-    return [startMs, endMs + 24 * 60 * 60 * 1000 - 1] as const;
-  }
-  return [startMs, endMs] as const;
-}
 
 function statusLabel(status: BorrowStatus) {
   if (status === 'borrowed') return '借阅中';
@@ -363,8 +321,8 @@ const gridOptions: VxeGridProps<BorrowRecord> = {
           resetGridSortToDefault();
         }
 
-        const borrowRange = normalizeRange(formValues.borrow_date_range);
-        const returnRange = normalizeRange(formValues.return_date_range);
+        const borrowRange = normalizeDateRangeToMs(formValues.borrow_date_range);
+        const returnRange = normalizeDateRangeToMs(formValues.return_date_range);
 
         return await listMyBorrowsApi({
           author: formValues.author,
