@@ -1,0 +1,19 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: lms-mongo
+    ports:
+      # 仅绑定本机，避免局域网暴露
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - lms-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 })"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  lms-mongo-data:
+
