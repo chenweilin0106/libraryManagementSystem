@@ -1,12 +1,74 @@
-# 运行指南（本地开发 / Windows）
+# 运行指南（本地开发）
 
 ## 前置条件
 
 - Node.js：建议 `>= 20.19.0`
 - pnpm：建议 `>= 10`
-- MongoDB：已安装为 Windows 服务（本项目后端默认连接 `mongodb://127.0.0.1:27017`，数据库名 `library`）
+- Docker：建议安装 Docker Desktop（WSL2 后端）；用于启动 MongoDB/Redis 容器
 
-## 1) 启动 MongoDB（Windows 服务）
+## 方案 A：WSL（推荐）
+
+### 1) 启动开发环境（MongoDB + Redis + 后端 + 前端）
+
+在 WSL 的项目根目录执行：
+
+```bash
+chmod +x ./start-dev.sh
+./start-dev.sh
+```
+
+可选参数：
+
+```bash
+# Windows 侧访问不到前端 localhost 时的兜底
+./start-dev.sh --host-all
+
+# 启动后不自动 attach tmux（便于脚本化/自检）
+./start-dev.sh --no-attach
+```
+
+说明：
+- 默认会创建/复用 `tmux` session：`lms-dev`，并在其中分流 `mongo/redis/backend/frontend` 日志。
+- 手动进入：`tmux attach -t lms-dev`
+- 常用 `tmux` 快捷键（先按 `Ctrl+b` 再按以下按键）：
+  - 切换窗口：`0/1/2/3`（`mongo/redis/backend/frontend`）
+  - 窗口列表：`w`
+  - 上/下一个窗口：`p` / `n`
+  - 回到上一个窗口：`l`
+  - 查看历史输出：`[` 进入滚动模式，`q` 退出
+  - 临时离开：`d`（detach，不会停止服务）
+
+访问：
+- 前端：`http://localhost:5777`
+- 后端健康检查：`http://localhost:3000/api/health`
+
+### 2) 停止开发环境（关闭全部服务）
+
+在 WSL 的项目根目录执行：
+
+```bash
+chmod +x ./stop-dev.sh
+./stop-dev.sh
+```
+
+说明：
+- 会停止：前端/后端（`tmux lms-dev`）+ MongoDB/Redis（Docker 容器）。
+- 默认不清理数据卷（不带 `-v`），数据会保留。
+
+### 3) 安装依赖（首次/依赖变更时）
+
+```bash
+pnpm -C backend install
+pnpm -C vue-vben-admin install
+```
+
+---
+
+## 方案 B：Windows（旧）
+
+> 仅作为旧方案记录：MongoDB 以 Windows 服务方式运行，后端/前端仍可在 Windows 侧手动启动。
+
+### 1) 启动 MongoDB（Windows 服务）
 
 两种方式任选其一：
 
@@ -18,7 +80,7 @@
 
 如果你的服务名称不是 `MongoDB`，可以用：`Get-Service *mongo*` 搜索真实服务名。
 
-## 2) 启动后端（Koa + TypeScript）
+### 2) 启动后端（Koa + TypeScript）
 
 在项目根目录执行：
 
@@ -29,7 +91,7 @@ pnpm -C backend dev
 
 - 健康检查：`http://localhost:3000/api/health`
 
-## 3) 启动前端（Vue Vben Admin / web-ele）
+### 3) 启动前端（Vue Vben Admin / web-ele）
 
 再开一个终端，在项目根目录执行：
 
@@ -40,7 +102,7 @@ pnpm -C vue-vben-admin dev:ele
 
 - 访问地址：`http://localhost:5777`
 
-## 4) （可选）启动 Redis（Docker Desktop / WSL2 后端）
+### 4) （可选）启动 Redis（Docker Desktop / WSL2 后端）
 
 用途：为后端的缓存/性能优化做准备；未接入前不影响现有功能。
 
